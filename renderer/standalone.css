@@ -1,0 +1,11 @@
+/* Replaces only the outer preview host; approved application styles stay intact. */
+html,
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  background: #18191d;
+}

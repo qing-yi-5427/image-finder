@@ -1,0 +1,72 @@
+{
+  "extends": null,
+  "appId": "local.imagefinder.app",
+  "productName": "Image Finder",
+  "directories": {
+    "output": "artifacts/installer-v0.2.16"
+  },
+  "files": [
+    "dist/src/**/*",
+    "dist/renderer/**/*",
+    "package.json",
+    "resources/ai/**/*",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "asarUnpack": [
+    "node_modules/better-sqlite3/**/*",
+    "node_modules/sharp/**/*",
+    "node_modules/@img/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "resources/branding",
+      "to": "branding",
+      "filter": [
+        "image-finder.png",
+        "image-finder.ico"
+      ]
+    },
+    {
+      "from": "scripts",
+      "to": "ai-runtime",
+      "filter": [
+        "ai-worker.py",
+        "ai-export.py",
+        "ai-verify.py",
+        "ai-translation.py",
+        "ai-install.mjs",
+        "ai-download.mjs",
+        "ai-manifest.json"
+      ]
+    },
+    {
+      "from": "resources/ai/licenses",
+      "to": "ai-runtime/licenses"
+    },
+    {
+      "from": "resources/ai/wd-translations.json",
+      "to": "ai-runtime/wd-translations.json"
+    }
+  ],
+  "win": {
+    "icon": "resources/branding/image-finder.ico",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
+  "artifactName": "Image-Finder-Setup-${version}-${arch}.${ext}",
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "runAfterFinish": false
+  }
+}

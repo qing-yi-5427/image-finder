@@ -1,0 +1,16 @@
+.if-sauce-settings form { max-width: 540px; }
+.if-utilities .if-sauce-settings .if-setting-description { margin-top: 12px; line-height: 1.8; }
+.if-utilities .if-sauce-consent { margin-top: 20px; }
+.if-sauce-results { margin-top: 25px; border-top: 1px solid var(--if-line); padding-top: 17px; }
+.if-sauce-results h3 { font-size: 13px; font-weight: 550; margin-bottom: 10px; }
+.if-sauce-result { border: 1px solid var(--if-line); border-radius: 7px; background: var(--if-panel); padding: 13px; margin-top: 10px; min-width: 0; overflow-wrap: anywhere; }
+.if-sauce-result > strong { display: block; color: var(--if-sub); font-size: 12px; font-weight: 500; margin-bottom: 9px; }
+.if-sauce-result > span { font-size: 11px; color: var(--if-muted); }
+.if-sauce-candidate { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--if-line); }
+.if-sauce-candidate > div { flex: 1; min-width: 0; }
+.if-sauce-candidate strong { font-size: 12px; font-weight: 500; }
+.if-sauce-candidate p, .if-sauce-candidate a { font-size: 11px; line-height: 1.8; }
+.if-sauce-candidate p { color: var(--if-muted); }
+.if-sauce-candidate a { color: var(--if-accent); }
+.if-sauce-candidate > button { flex-shrink: 0; }
+@media (max-width: 820px) { .if-sauce-candidate { flex-wrap: wrap; } .if-sauce-candidate > div { flex-basis: 100%; } }

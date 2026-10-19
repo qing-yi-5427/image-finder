@@ -1,0 +1,106 @@
+{
+  "name": "image-finder",
+  "version": "0.2.16",
+  "private": true,
+  "description": "本地插画目录索引与整理服务",
+  "main": "dist/src/electron/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.renderer.json && vite build",
+    "test": "node scripts/run-node.mjs --test dist/tests/*.test.js",
+    "dev": "npm run build && electron .",
+    "smoke": "electron . --smoke",
+    "package": "npm run build && electron-builder --dir",
+    "package:smoke": "node scripts/packaged-smoke.mjs",
+    "postinstall": "electron-builder install-app-deps",
+    "check": "npm run build && npm test",
+    "format": "prettier --write src tests scripts/*.ts scripts/*.mjs package.json tsconfig.json",
+    "installer": "npm run build && electron-builder --win nsis --config electron-builder.installer.json"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "lucide-react": "^0.577.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.12",
+    "playwright-core": "^1.64.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.4"
+  },
+  "build": {
+    "appId": "local.imagefinder.app",
+    "productName": "Image Finder",
+    "directories": {
+      "output": "artifacts/package-v0.2.16"
+    },
+    "files": [
+      "dist/src/**/*",
+      "dist/renderer/**/*",
+      "package.json",
+      "resources/ai/**/*",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/branding",
+        "to": "branding",
+        "filter": [
+          "image-finder.png",
+          "image-finder.ico"
+        ]
+      },
+      {
+        "from": "ai-runtime",
+        "to": "ai-runtime",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.part",
+          "!python/.temp/**",
+          "!python/cpython-3.12-windows-x86_64-none",
+          "!python/cpython-3.12-windows-x86_64-none/**"
+        ]
+      },
+      {
+        "from": "scripts",
+        "to": "ai-runtime",
+        "filter": [
+          "ai-worker.py",
+          "ai-export.py",
+          "ai-verify.py",
+          "ai-translation.py",
+          "ai-install.mjs",
+          "ai-download.mjs",
+          "ai-manifest.json"
+        ]
+      },
+      {
+        "from": "resources/ai/licenses",
+        "to": "ai-runtime/licenses"
+      },
+      {
+        "from": "resources/ai/wd-translations.json",
+        "to": "ai-runtime/wd-translations.json"
+      }
+    ],
+    "win": {
+      "icon": "resources/branding/image-finder.ico",
+      "target": "dir"
+    }
+  }
+}
