@@ -1,0 +1,43 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { CacheOperationGate } from "../src/electron/cache-gate.js";
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+test("cache changes drain already-resolved old paths until the file response opens, and new requests wait for the new directory", async () => {
+  const gate = new CacheOperationGate();
+  const opening = deferred(), switching = deferred();
+  const events: string[] = [];
+  let directory = "old";
+  const oldRequest = gate.read(async () => { events.push("old-path-resolved"); await opening.promise; events.push("old-response-open"); return directory; });
+  const change = gate.change(async () => { events.push("change-start"); await switching.promise; directory = "new"; events.push("change-committed"); });
+  const newRequest = gate.read(async () => { events.push("new-path-resolved"); return directory; });
+  assert.deepEqual(events, ["old-path-resolved"]);
+  opening.resolve();
+  assert.equal(await oldRequest, "old");
+  await Promise.resolve();
+  assert.deepEqual(events, ["old-path-resolved", "old-response-open", "change-start"]);
+  switching.resolve();
+  await change;
+  assert.equal(await newRequest, "new");
+  assert.deepEqual(events, ["old-path-resolved", "old-response-open", "change-start", "change-committed", "new-path-resolved"]);
+});
+test("failed file opens and failed cache changes release their gates; queued changes serialize", async () => {
+  const gate = new CacheOperationGate();
+  await assert.rejects(gate.read(async () => { throw new Error("open failed"); }), /open failed/);
+  const failure = gate.change(async () => { throw new Error("migration failed"); });
+  const next = gate.read(async () => "still available");
+  await assert.rejects(failure, /migration failed/);
+  assert.equal(await next, "still available");
+  const first = deferred();
+  const events: number[] = [];
+  const one = gate.change(async () => { events.push(1); await first.promise; events.push(2); });
+  const two = gate.change(async () => { events.push(3); });
+  await Promise.resolve();
+  assert.deepEqual(events, [1]);
+  first.resolve();
+  await Promise.all([one, two]);
+  assert.deepEqual(events, [1, 2, 3]);
+});

@@ -17,6 +17,7 @@ export class ServiceHost {
     transport?: (url: string) => Promise<SourceReply>,
     options: {
       startPaused?: boolean;
+      cachePreferenceFile?: string;
       sauceRequest?: (
         preview: Uint8Array,
       ) => Promise<{ status: number; body: string }>;
@@ -24,7 +25,8 @@ export class ServiceHost {
   ) {
     this.child = fork(
       fileURLToPath(new URL("../workers/service-worker.js", import.meta.url)),
-      [dataDir, ...(options.startPaused ? ["--start-paused"] : [])],
+      [dataDir, ...(options.startPaused ? ["--start-paused"] : []),
+        ...(options.cachePreferenceFile ? [`--cache-preferences=${options.cachePreferenceFile}`] : [])],
       {
         env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
         stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -112,7 +114,7 @@ export class ServiceHost {
           this.pending.delete(id);
           reject(new Error("Worker request timed out"));
         },
-        method === "__close" ? 40000 : 300000,
+        method === "__close" ? 40000 : ["cache.initialize", "cache.configure"].includes(method) ? 30 * 60 * 1000 : 300000,
       );
       this.pending.set(id, { resolve, reject, timer });
       this.child.send({ id, method, payload }, (error) => {

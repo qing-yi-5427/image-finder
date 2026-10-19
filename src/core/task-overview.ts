@@ -64,7 +64,7 @@ export function taskOverview(
       (scope.recursive ? "（含子目录）" : "（不含子目录）");
   }
   // Bind one immutable scope CTE to every metric; viewing cannot mutate any queue.
-  const prefix = `WITH scoped AS (SELECT f.* FROM files f WHERE ${where}) `;
+  const prefix = `WITH scoped AS (SELECT f.* FROM files_visible f WHERE ${where}) `;
   const count = (sql: string, ...extra: any[]) =>
     Number((c.db.prepare(prefix + sql).get(...args, ...extra) as any)?.n ?? 0);
   const groups = (sql: string, ...extra: any[]) =>

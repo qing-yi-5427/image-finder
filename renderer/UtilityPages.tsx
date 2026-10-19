@@ -472,6 +472,24 @@ export function SettingsPage({
     [mode, setMode] = useState<"system" | "direct" | "custom">("system"),
     [proxy, setProxy] = useState(""),
     [confirm, setConfirm] = useState<"restore" | "clearCache" | null>(null);
+  const [cache, setCache] = useState<{directory:string;requestedDirectory:string|null;error:string|null}|null>(null);
+  const [cacheError, setCacheError] = useState("");
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const loadCache = async () => { try { setCache(await api.invoke("cache.status", {})); setCacheError(""); } catch (e) { setCacheError(error(e)); } };
+  useEffect(() => { void loadCache(); }, []);
+  const selectCache = async () => {
+    if (cacheBusy) return;
+    setCacheBusy(true);
+    try {
+      const selected = await api.invoke("cache.select", {});
+      await loadCache();
+      if (selected?.error) {
+        setCacheError(selected.error);
+        notify(selected.directory === selected.requestedDirectory ? "缓存位置已切换，但请查看提示" : `缓存迁移未完成：${selected.error}`, undefined, "error");
+      } else if (selected) notify("缩略图缓存位置已更新");
+    } catch (e) { await loadCache(); setCacheError(error(e)); notify(error(e), undefined, "error"); }
+    finally { setCacheBusy(false); }
+  };
   const [power,setPower]=useState<{enabled:boolean;active:boolean;error:string|null}|null>(null);
   const [powerBusy,setPowerBusy]=useState(false);
   const [powerError,setPowerError]=useState("");
@@ -557,6 +575,18 @@ export function SettingsPage({
             </p>
           </div>
         </div>
+        {settings?.dataDirectoryWarning && <p className="if-ai-error" role="status">{settings.dataDirectoryWarning}</p>}
+        <div className="if-setting-row" aria-label="缩略图缓存位置">
+          <div className="if-setting-copy">
+            <div className="if-setting-label">缩略图缓存目录</div>
+            <p className="if-utility-path">{cache?.directory || "正在读取缓存目录…"}</p>
+            {cache?.requestedDirectory && cache.requestedDirectory !== cache.directory && <p className="if-setting-description">请求位置：{cache.requestedDirectory}</p>}
+            <p className="if-setting-description">默认位于用户目录下的专用隐藏目录 .image-finder-cache。选择父目录后，仅迁移缩略图缓存；图库数据库、标签、AI 环境与原图片均不搬动。</p>
+            <p className="if-setting-description">迁移失败时保留原缓存目录，实际使用位置以此处显示为准。</p>
+            {(cacheError || cache?.error) && <p className="if-ai-error" role="alert">{cacheError || cache?.error}</p>}
+          </div>
+          <Button disabled={busy || cacheBusy || !cache} onClick={() => void selectCache()}>{cacheBusy ? "正在迁移缓存…" : "选择缓存位置"}</Button>
+        </div>
         <div className="if-setting-row">
           <label className="if-setting-copy if-setting-label" htmlFor="settings-cache-limit">
             缓存容量上限（GiB）
@@ -573,7 +603,7 @@ export function SettingsPage({
               onChange={(e) => setLimit(e.target.value)}
             />
             <Button
-              disabled={busy}
+              disabled={busy || cacheBusy}
               onClick={() =>
                 act(async () => {
                   const n = Number(limit);
@@ -594,7 +624,7 @@ export function SettingsPage({
           <div className="if-setting-copy">
             预览缓存可安全重建，清理不会移除原图和整理信息
           </div>
-          <Button disabled={busy} onClick={() => setConfirm("clearCache")}>
+          <Button disabled={busy || cacheBusy} onClick={() => setConfirm("clearCache")}>
             清理缓存
           </Button>
         </div>

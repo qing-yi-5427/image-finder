@@ -1,3 +1,7 @@
+import {dataPathExclusion} from "./data-path.js";
+import {visibleFilesView,hasDotDirectory,excludedDirectorySql} from "./directory-policy.js";
+import {removeExcludedDirectoryRecords} from "./directory-migration.js";
+import {hideManagedDataDirectory} from "./managed-data.js";
 import {
   AI_EFFECTIVE_SCHEMA,
   automaticCandidateSelect,
@@ -33,13 +37,20 @@ const clamp = (
   fallback: number,
 ) => Math.max(min, Math.min(max, n ?? fallback));
 export class Catalog {
+  cacheDirectory: string;
+  managedPathExclusion(){const a=dataPathExclusion(this.dataDir),b=dataPathExclusion(this.cacheDirectory);return (target:string)=>a(target)||b(target);}
+  isManagedPath(target:string){return this.managedPathExclusion()(target);}
   private bulkQuery = false;
   private aiScores: Map<string, number> | null = null;
   readonly db: Database.Database;
   readonly dataDir: string;
+  readonly dataDirectoryWarning:string|null;
+  readonly directoryMigration:{removed:number;backup:string|null};
   constructor(dataDir: string) {
     this.dataDir = path.resolve(dataDir);
+    this.cacheDirectory=path.join(this.dataDir,"thumbnails");
     mkdirSync(this.dataDir, { recursive: true });
+    this.dataDirectoryWarning=hideManagedDataDirectory(this.dataDir);
     this.db = new Database(path.join(this.dataDir, "catalog.sqlite"));
     this.db.function("normalize_text", { deterministic: true }, (value) =>
       normalize(String(value ?? "")),
@@ -97,6 +108,8 @@ export class Catalog {
   CREATE INDEX IF NOT EXISTS files_root ON files(root_id,missing); CREATE INDEX IF NOT EXISTS files_identity ON files(root_id,identity,bytes,mtime_ms); CREATE INDEX IF NOT EXISTS files_artwork ON files(artwork_id); CREATE INDEX IF NOT EXISTS files_added ON files(added_at DESC,id); CREATE INDEX IF NOT EXISTS files_dimensions ON files(height,width);
   CREATE INDEX IF NOT EXISTS artwork_tags_tag ON artwork_tags(tag_id,artwork_id); CREATE INDEX IF NOT EXISTS overrides_tag ON file_tag_overrides(tag_id,file_id,action); CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(status,next_run_at,priority);
   PRAGMA user_version=1;`);
+    this.db.exec(visibleFilesView());
+    this.db.exec("DROP VIEW IF EXISTS ai_auto_effective;DROP VIEW IF EXISTS ai_valid_runs;");
     this.db.exec(AI_EFFECTIVE_SCHEMA);
     if (
       !(this.db.pragma("table_info(files)") as any[]).some(
@@ -109,6 +122,7 @@ export class Catalog {
     this.db.exec(
       "UPDATE files SET format=CASE WHEN lower(relative_path) LIKE '%.jpg' OR lower(relative_path) LIKE '%.jpeg' THEN 'jpeg' WHEN lower(relative_path) LIKE '%.png' THEN 'png' ELSE format END WHERE format IS NULL",
     );
+    this.directoryMigration=removeExcludedDirectoryRecords(this.db,this.dataDir);
   }
   close() {
     if (this.db.open) this.db.close();
@@ -116,7 +130,7 @@ export class Catalog {
   roots(): LibraryRoot[] {
     return this.db
       .prepare(
-        "SELECT id,path,status,created_at createdAt,last_scan_at lastScanAt FROM roots ORDER BY created_at",
+        `SELECT id,path,status,created_at createdAt,last_scan_at lastScanAt FROM roots WHERE NOT ${excludedDirectorySql("path")} ORDER BY created_at`,
       )
       .all() as LibraryRoot[];
   }
@@ -134,6 +148,7 @@ export class Catalog {
       }
     };
     const target = canonical(directory);
+    if(hasDotDirectory(path.resolve(directory))||hasDotDirectory(target))throw new Error("EXCLUDED_DIRECTORY");
     const overlaps = (a: string, b: string) => {
       const rel = path.relative(a, b);
       return (
@@ -145,7 +160,7 @@ export class Catalog {
     const data = canonical(this.dataDir);
     // A source may contain the data directory; scanning explicitly excludes it.
     // The data directory itself (or its descendants) cannot become a source.
-    if (overlaps(data, target)) throw new Error("SOURCE_DATA_OVERLAP");
+    if (overlaps(data, target)||overlaps(canonical(this.cacheDirectory),target)) throw new Error("SOURCE_DATA_OVERLAP");
     for (const root of this.roots()) {
       if (
         root.id !== exceptId &&
@@ -177,7 +192,7 @@ export class Catalog {
     return safeResolve(this, fileId);
   }
   private selectSql() {
-    return `SELECT f.id,f.root_id rootId,f.relative_path relativePath,f.bytes,f.mtime_ms mtimeMs,f.added_at addedAt,f.missing,f.artwork_id artworkId,f.page,f.candidate_artwork_id candidateArtworkId,f.favorite,f.rating,f.width,f.height,f.format,f.thumbnail_key thumbnailKey,a.title,c.name creatorName,z.palette_json paletteJson FROM files f LEFT JOIN artworks a ON a.id=f.artwork_id LEFT JOIN creators c ON c.id=a.creator_id LEFT JOIN features z ON z.file_id=f.id`;
+    return `SELECT f.id,f.root_id rootId,f.relative_path relativePath,f.bytes,f.mtime_ms mtimeMs,f.added_at addedAt,f.missing,f.artwork_id artworkId,f.page,f.candidate_artwork_id candidateArtworkId,f.favorite,f.rating,f.width,f.height,f.format,f.thumbnail_key thumbnailKey,a.title,c.name creatorName,z.palette_json paletteJson FROM files_visible f LEFT JOIN artworks a ON a.id=f.artwork_id LEFT JOIN creators c ON c.id=a.creator_id LEFT JOIN features z ON z.file_id=f.id`;
   }
   private mapFile(row: any): FileItem {
     const { paletteJson, ...rest } = row;
@@ -197,7 +212,7 @@ export class Catalog {
     const file = this.getFile(fileId);
     const row = this.db
       .prepare(
-        "SELECT processing_error,feature_version,cache_evicted FROM files WHERE id=?",
+        "SELECT processing_error,feature_version,cache_evicted FROM files_visible WHERE id=?",
       )
       .get(fileId) as any;
     const source = this.db
@@ -208,7 +223,7 @@ export class Catalog {
     const tags = (
       this.db
         .prepare(
-          `SELECT t.id,t.name,t.category,EXISTS(SELECT 1 FROM artwork_tags at WHERE at.artwork_id=f.artwork_id AND at.tag_id=t.id) inherited,o.action override FROM files f CROSS JOIN tags t LEFT JOIN file_tag_overrides o ON o.file_id=f.id AND o.tag_id=t.id WHERE f.id=? AND (o.action IS NOT NULL OR EXISTS(SELECT 1 FROM artwork_tags at WHERE at.artwork_id=f.artwork_id AND at.tag_id=t.id))`,
+          `SELECT t.id,t.name,t.category,EXISTS(SELECT 1 FROM artwork_tags at WHERE at.artwork_id=f.artwork_id AND at.tag_id=t.id) inherited,o.action override FROM files_visible f CROSS JOIN tags t LEFT JOIN file_tag_overrides o ON o.file_id=f.id AND o.tag_id=t.id WHERE f.id=? AND (o.action IS NOT NULL OR EXISTS(SELECT 1 FROM artwork_tags at WHERE at.artwork_id=f.artwork_id AND at.tag_id=t.id))`,
         )
         .all(fileId) as any[]
     ).map((t) => ({
@@ -379,7 +394,7 @@ export class Catalog {
   private textTagFileIds(pattern: string): string[] {
     const rows = this.db
       .prepare(
-        `WITH translated AS MATERIALIZED(SELECT tag FROM ai_lexicon WHERE normalize_text(display_name) LIKE ? ESCAPE '\\'), matching AS MATERIALIZED(SELECT tag_id FROM tag_aliases WHERE alias_key LIKE ? ESCAPE '\\' UNION SELECT k.tag_id FROM ai_tag_keys k JOIN translated x ON x.tag=k.tag UNION SELECT d.tag_id FROM danbooru_tags d JOIN translated x ON x.tag=d.raw_name), related AS (SELECT r.file_id,r.tag_id FROM ai_reviews r JOIN translated x ON x.tag=r.tag WHERE r.tag_id IS NOT NULL AND r.action='accept' UNION SELECT f.id file_id,a.tag_id FROM artwork_tags a JOIN matching m ON m.tag_id=a.tag_id JOIN files f ON f.artwork_id=a.artwork_id UNION SELECT o.file_id,o.tag_id FROM file_tag_overrides o JOIN matching m ON m.tag_id=o.tag_id WHERE o.action='add' UNION SELECT r.file_id,r.tag_id FROM ai_reviews r JOIN matching m ON m.tag_id=r.tag_id WHERE r.action='accept' UNION SELECT d.file_id,d.tag_id FROM danbooru_tags d JOIN matching m ON m.tag_id=d.tag_id UNION SELECT a.file_id,a.tag_id FROM ai_auto_effective a JOIN matching m ON m.tag_id=a.tag_id) SELECT DISTINCT r.file_id FROM related r WHERE NOT EXISTS(SELECT 1 FROM file_tag_overrides o WHERE o.file_id=r.file_id AND o.tag_id=r.tag_id AND o.action='exclude')`,
+        `WITH translated AS MATERIALIZED(SELECT tag FROM ai_lexicon WHERE normalize_text(display_name) LIKE ? ESCAPE '\\'), matching AS MATERIALIZED(SELECT tag_id FROM tag_aliases WHERE alias_key LIKE ? ESCAPE '\\' UNION SELECT k.tag_id FROM ai_tag_keys k JOIN translated x ON x.tag=k.tag UNION SELECT d.tag_id FROM danbooru_tags d JOIN translated x ON x.tag=d.raw_name), related AS (SELECT r.file_id,r.tag_id FROM ai_reviews r JOIN translated x ON x.tag=r.tag WHERE r.tag_id IS NOT NULL AND r.action='accept' UNION SELECT f.id file_id,a.tag_id FROM artwork_tags a JOIN matching m ON m.tag_id=a.tag_id JOIN files_visible f ON f.artwork_id=a.artwork_id UNION SELECT o.file_id,o.tag_id FROM file_tag_overrides o JOIN matching m ON m.tag_id=o.tag_id WHERE o.action='add' UNION SELECT r.file_id,r.tag_id FROM ai_reviews r JOIN matching m ON m.tag_id=r.tag_id WHERE r.action='accept' UNION SELECT d.file_id,d.tag_id FROM danbooru_tags d JOIN matching m ON m.tag_id=d.tag_id UNION SELECT a.file_id,a.tag_id FROM ai_auto_effective a JOIN matching m ON m.tag_id=a.tag_id) SELECT DISTINCT r.file_id FROM related r WHERE NOT EXISTS(SELECT 1 FROM file_tag_overrides o WHERE o.file_id=r.file_id AND o.tag_id=r.tag_id AND o.action='exclude')`,
       )
       .all(pattern, pattern) as any[];
     return rows.map((r) => r.file_id);
@@ -551,8 +566,8 @@ export class Catalog {
           `SELECT ${distanceOrder} colorDistance,ROW_NUMBER() OVER(PARTITION BY COALESCE(f.artwork_id,f.id) ORDER BY ${order}) stackRow,COUNT(*) OVER(PARTITION BY COALESCE(f.artwork_id,f.id)) matchedCount,COALESCE(lc.localCount,1) localCount,`,
         )
         .replace(
-          " FROM files f LEFT JOIN",
-          " FROM files f LEFT JOIN (SELECT artwork_id,COUNT(*) localCount FROM files WHERE artwork_id IS NOT NULL GROUP BY artwork_id) lc ON lc.artwork_id=f.artwork_id LEFT JOIN",
+          " FROM files_visible f LEFT JOIN",
+          " FROM files_visible f LEFT JOIN (SELECT artwork_id,COUNT(*) localCount FROM files_visible WHERE artwork_id IS NOT NULL GROUP BY artwork_id) lc ON lc.artwork_id=f.artwork_id LEFT JOIN",
         );
       const grouped = "SELECT * FROM (" + inner + ") WHERE stackRow=1";
       const total = (
@@ -620,7 +635,7 @@ export class Catalog {
   ): import("../api.js").AuthorDto[] {
     return this.db
       .prepare(
-        `SELECT c.id,c.name,COUNT(f.id) usageCount FROM creators c LEFT JOIN artworks a ON a.creator_id=c.id LEFT JOIN files f ON f.artwork_id=a.id WHERE instr(normalize_text(c.name),?)>0 GROUP BY c.id ORDER BY normalize_text(c.name),c.id LIMIT ? OFFSET ?`,
+        `SELECT c.id,c.name,COUNT(f.id) usageCount FROM creators c LEFT JOIN artworks a ON a.creator_id=c.id LEFT JOIN files_visible f ON f.artwork_id=a.id WHERE instr(normalize_text(c.name),?)>0 GROUP BY c.id ORDER BY normalize_text(c.name),c.id LIMIT ? OFFSET ?`,
       )
       .all(
         normalize(search),
@@ -634,7 +649,7 @@ export class Catalog {
   tags(search = "", offset = 0, limit = 100, category?: TagCategory) {
     return this.db
       .prepare(
-        `WITH effective AS (SELECT f.id file_id,at.tag_id FROM files f JOIN artwork_tags at ON at.artwork_id=f.artwork_id UNION SELECT file_id,tag_id FROM file_tag_overrides WHERE action='add' UNION SELECT file_id,tag_id FROM ai_reviews WHERE action='accept' AND tag_id IS NOT NULL UNION SELECT file_id,tag_id FROM danbooru_tags UNION SELECT file_id,tag_id FROM ai_auto_effective), counts AS (SELECT e.tag_id,COUNT(DISTINCT e.file_id) n FROM effective e LEFT JOIN file_tag_overrides o ON o.file_id=e.file_id AND o.tag_id=e.tag_id AND o.action='exclude' WHERE o.file_id IS NULL GROUP BY e.tag_id) SELECT t.*,(SELECT json_group_array(alias) FROM tag_aliases al WHERE al.tag_id=t.id) aliasesJson,COALESCE(counts.n,0) usageCount FROM tags t LEFT JOIN counts ON counts.tag_id=t.id WHERE (? IS NULL OR t.category=?) AND EXISTS(SELECT 1 FROM tag_aliases al WHERE al.tag_id=t.id AND instr(al.alias_key,?)>0) ORDER BY t.name,t.id LIMIT ? OFFSET ?`,
+        `WITH effective AS (SELECT f.id file_id,at.tag_id FROM files_visible f JOIN artwork_tags at ON at.artwork_id=f.artwork_id UNION SELECT file_id,tag_id FROM file_tag_overrides WHERE action='add' UNION SELECT file_id,tag_id FROM ai_reviews WHERE action='accept' AND tag_id IS NOT NULL UNION SELECT file_id,tag_id FROM danbooru_tags UNION SELECT file_id,tag_id FROM ai_auto_effective), counts AS (SELECT e.tag_id,COUNT(DISTINCT e.file_id) n FROM effective e JOIN files_visible visible ON visible.id=e.file_id LEFT JOIN file_tag_overrides o ON o.file_id=e.file_id AND o.tag_id=e.tag_id AND o.action='exclude' WHERE o.file_id IS NULL GROUP BY e.tag_id) SELECT t.*,(SELECT json_group_array(alias) FROM tag_aliases al WHERE al.tag_id=t.id) aliasesJson,COALESCE(counts.n,0) usageCount FROM tags t LEFT JOIN counts ON counts.tag_id=t.id WHERE (? IS NULL OR t.category=?) AND EXISTS(SELECT 1 FROM tag_aliases al WHERE al.tag_id=t.id AND instr(al.alias_key,?)>0) ORDER BY t.name,t.id LIMIT ? OFFSET ?`,
       )
       .all(
         category ?? null,
@@ -1151,7 +1166,7 @@ export class Catalog {
       throw new Error("INVALID_ARTWORK");
     if (
       this.db
-        .prepare("SELECT 1 FROM files WHERE artwork_id=? AND page>=?")
+        .prepare("SELECT 1 FROM files_visible WHERE artwork_id=? AND page>=?")
         .get(payload.id, payload.pageCount)
     )
       throw new Error("PAGE_OUT_OF_RANGE");
@@ -1270,7 +1285,7 @@ export class Catalog {
       if (inside(actual)) throw new Error("SOURCE_OUTPUT_FORBIDDEN");
     }
     if (
-      inside(path.join(this.dataDir, "thumbnails")) ||
+      inside(this.cacheDirectory) ||
       ["catalog.sqlite", "catalog.sqlite-wal", "catalog.sqlite-shm"].some(
         (name) =>
           target.toLowerCase() === path.join(this.dataDir, name).toLowerCase(),
@@ -1363,6 +1378,7 @@ export class Catalog {
       } finally {
         this.db.exec("DETACH DATABASE incoming");
       }
+      removeExcludedDirectoryRecords(this.db,this.dataDir);
       return this.stats();
     } finally {
       incoming.close();
@@ -1416,13 +1432,13 @@ export class Catalog {
   }
   stats() {
     return {
-      files: (this.db.prepare("SELECT COUNT(*) n FROM files").get() as any).n,
+      files: (this.db.prepare("SELECT COUNT(*) n FROM files_visible").get() as any).n,
       roots: this.roots(),
       jobs: this.db
         .prepare("SELECT status,COUNT(*) count FROM jobs GROUP BY status")
         .all(),
       features: (
-        this.db.prepare("SELECT COUNT(*) n FROM features").get() as any
+        this.db.prepare("SELECT COUNT(*) n FROM features z JOIN files_visible f ON f.id=z.file_id").get() as any
       ).n,
     };
   }

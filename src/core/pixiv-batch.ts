@@ -29,7 +29,7 @@ export function pixivBatchSelection(
   const root = catalog.getRoot(input.rootId);
   const scope = { ...input, relativePath: directoryPath(input.relativePath) };
   const target = path.resolve(root.path, ...scope.relativePath.split("/"));
-  if (isDataPath(catalog.dataDir, target))
+  if (catalog.isManagedPath(target))
     throw new Error("图库数据目录不会参与 Pixiv 补全。");
   const prefix = scope.relativePath ? scope.relativePath + "/" : "";
   const where = ["f.root_id=?", "f.missing=0"];
@@ -63,7 +63,7 @@ export function pixivBatchSelection(
   const rows = (
     catalog.db
       .prepare(
-        `SELECT f.id,f.relative_path relativePath,f.artwork_id artworkId,j.id jobId,j.status,a.id IS NOT NULL hasSource FROM files f LEFT JOIN jobs j ON j.artwork_id=f.artwork_id LEFT JOIN artworks a ON a.id=f.artwork_id WHERE ${where.join(" AND ")} ORDER BY f.id`,
+        `SELECT f.id,f.relative_path relativePath,f.artwork_id artworkId,j.id jobId,j.status,a.id IS NOT NULL hasSource FROM files_visible f LEFT JOIN jobs j ON j.artwork_id=f.artwork_id LEFT JOIN artworks a ON a.id=f.artwork_id WHERE ${where.join(" AND ")} ORDER BY f.id`,
       )
       .all(...args) as Candidate[]
   ).filter(

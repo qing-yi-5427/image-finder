@@ -5,6 +5,7 @@ export function userError(error: unknown): string {
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
     .replace(/^Error:\s*/, "");
   const known: Record<string, string> = {
+    EXCLUDED_DIRECTORY: "以点开头的目录不会加入图库，请选择普通原图目录。",
     SOURCE_DATA_OVERLAP: "原目录不能与图库数据目录重叠，请选择其他文件夹。",
     ROOT_OVERLAP: "所选目录与已关联的原目录重叠，请选择其他文件夹。",
     ROOT_NOT_FOUND: "目录索引已不存在，请刷新后重试。",

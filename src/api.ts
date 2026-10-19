@@ -35,6 +35,7 @@ export interface CollectionDto {
 }
 export type NetworkStatus = SourceNetworkStatus;
 export interface SettingsDto {
+  dataDirectoryWarning?:string|null;
   dataDir: string;
   cacheLimitBytes: number;
 }
@@ -267,6 +268,8 @@ export interface MethodMap extends importAiMethodMap {
   "system.backup": Route<Empty, string | null>;
   "system.export": Route<Empty, string | null>;
   "system.restore": Route<Empty, ProgressEvent | null>;
+  "cache.status": Route<Empty, {directory:string;requestedDirectory:string;error:string|null}>;
+  "cache.select": Route<Empty, {directory:string;requestedDirectory:string;error:string|null}|null>;
   "system.clearCache": Route<Empty, boolean>;
   "tasks.overview": Route<
     { scope?: import("./core/ai-effective.js").AutoTagScope | null },

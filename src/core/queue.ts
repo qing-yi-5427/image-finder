@@ -109,7 +109,7 @@ export class PixivQueue {
     if (scope) {
       this.catalog.getRoot(scope.rootId);
       const prefix = scope.relativePath ? scope.relativePath + "/" : "";
-      scopeFilter = " AND EXISTS(SELECT 1 FROM files f WHERE f.artwork_id=jobs.artwork_id AND f.root_id=? AND f.missing=0 AND substr(replace(f.relative_path,char(92),'/'),1,?)=?";
+      scopeFilter = " AND EXISTS(SELECT 1 FROM files_visible f WHERE f.artwork_id=jobs.artwork_id AND f.root_id=? AND f.missing=0 AND substr(replace(f.relative_path,char(92),'/'),1,?)=?";
       scopeArgs.push(scope.rootId, prefix.length, prefix);
       if (!scope.recursive) {
         scopeFilter += " AND instr(substr(replace(f.relative_path,char(92),'/'),?),'/')=0";
@@ -307,7 +307,7 @@ export class PixivQueue {
       "SELECT a.title,c.name creatorName FROM artworks a LEFT JOIN creators c ON c.id=a.creator_id WHERE a.id=?",
     );
     const thumbnail = this.catalog.db.prepare(
-      "SELECT id FROM files WHERE artwork_id=? AND thumbnail_key IS NOT NULL AND missing=0 LIMIT 1",
+      "SELECT id FROM files_visible WHERE artwork_id=? AND thumbnail_key IS NOT NULL AND missing=0 LIMIT 1",
     );
     for (const item of items) {
       Object.assign(item, metadata.get(item.artworkId) ?? {});
@@ -449,7 +449,7 @@ export class PixivQueue {
       const payload = await fetchArtwork(job.artwork_id, this.options.fetcher);
       if(generation!==this.generation)return true;
       const bad = db
-        .prepare("SELECT 1 FROM files WHERE artwork_id=? AND page>=? LIMIT 1")
+        .prepare("SELECT 1 FROM files_visible WHERE artwork_id=? AND page>=? LIMIT 1")
         .get(payload.id, payload.pageCount);
       if (bad)
         throw new SourceError(

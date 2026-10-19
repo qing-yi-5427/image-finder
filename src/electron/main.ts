@@ -1,6 +1,8 @@
 import { AppTray, trayIconPath } from "./tray.js";
 import { NativeFileDrag } from "./file-drag.js";
 import { AiEnvironment, markManagedAiHome } from "./ai-environment.js";
+import { readCachePreferences } from "./cache-preferences.js";
+import { CacheOperationGate } from "./cache-gate.js";
 import { trayPauseActions, type TrayTaskSnapshot } from "./tray-actions.js";
 import { TaskPowerPreference } from "./task-power-preference.js";
 import {
@@ -118,6 +120,11 @@ void app.whenReady().then(async () => {
   await sourceNetwork.initialize();
   const sauceNetwork = new SauceNetwork(dataDir);
   await sauceNetwork.initialize();
+  const cacheProfileDirectory = smoke
+    ? await mkdtemp(join(tmpdir(), "image-finder-smoke-cache-profile-"))
+    : app.getPath("userData");
+  const cachePreferenceFile = join(cacheProfileDirectory, "cache-location.json");
+  const cachePreference = await readCachePreferences(cachePreferenceFile, join(cacheProfileDirectory, ".image-finder-cache"));
   host = new ServiceHost(
     dataDir,
     async (url) => {
@@ -151,9 +158,11 @@ void app.whenReady().then(async () => {
     },
     {
       startPaused: process.argv.includes("--start-paused"),
+      cachePreferenceFile,
       sauceRequest: (preview) => sauceNetwork.request(preview),
     },
   );
+  await host.invoke("cache.initialize", cachePreference);
   const rendererPath = fileURLToPath(
     new URL("../../renderer/index.html", import.meta.url),
   );
@@ -181,6 +190,7 @@ void app.whenReady().then(async () => {
       ).response === 1,
   });
   let aiCleaning = false;
+  const cacheGate = new CacheOperationGate();
   ipcMain.handle("image-finder:invoke", async (event, method, payload = {}) => {
     if (
       event.sender !== window.webContents ||
@@ -228,6 +238,15 @@ void app.whenReady().then(async () => {
       if (selected.canceled || !selected.filePath) return null;
       payload = { ...payload, destination: selected.filePath };
     } else validateInvocation(method, payload);
+    if (method === "cache.select") {
+      const selected = await dialog.showOpenDialog(window, {
+        title: "选择缓存存放位置（将在所选目录下创建独立隐藏缓存文件夹）",
+        properties: ["openDirectory"],
+      });
+      if (selected.canceled || !selected.filePaths[0]) return null;
+      const directory = join(await realpath(selected.filePaths[0]), ".image-finder-cache");
+      return cacheGate.change(() => host.invoke("cache.configure", { directory }));
+    }
     if (aiCleaning && method.startsWith("ai.") && !["ai.status", "ai.environment"].includes(method))
       throw new Error("AI 环境正在清理，请稍后重试");
     if (aiCleaning && ["library.add", "library.relocate"].includes(method))
@@ -307,7 +326,7 @@ void app.whenReady().then(async () => {
     if (method === "network.logout") return sourceNetwork.logout();
     return host.invoke(method, payload);
   });
-  protocol.handle("image-finder", async (request) => {
+  protocol.handle("image-finder", (request) => cacheGate.read(async () => {
     try {
       const url = new URL(request.url);
       const fileId = decodeURIComponent(url.pathname.slice(1));
@@ -319,11 +338,11 @@ void app.whenReady().then(async () => {
           : "thumbnail";
       const item = await host.invoke("images.resolve", { fileId, variant });
       const resolved = await realpath(item.path);
-      return net.fetch(pathToFileURL(resolved).href);
+      return await net.fetch(pathToFileURL(resolved).href);
     } catch {
       return new Response(null, { status: 404 });
     }
-  });
+  }));
   const window = new BrowserWindow({
     width: 1600,
     height: 1000,

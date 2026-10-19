@@ -1,3 +1,4 @@
+import {hasDotDirectory} from "./directory-policy.js";
 import { readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { Catalog } from "./catalog.js";
@@ -15,7 +16,8 @@ export async function directories(
 ) {
   const root = catalog.getRoot(rootId);
   const relativePath = directoryPath(relative);
-  if (isDataPath(catalog.dataDir, path.join(root.path, ...relativePath.split("/"))))
+  if(hasDotDirectory(root.path)||hasDotDirectory(relativePath))throw new Error("INVALID_DIRECTORY_SCOPE");
+  if (catalog.isManagedPath(path.join(root.path, ...relativePath.split("/"))))
     throw new Error("INVALID_DIRECTORY_SCOPE");
   const prefix = relativePath ? relativePath + "/" : "";
   // Each prefix range uses the existing (root_id,relative_path) unique index.
@@ -23,11 +25,11 @@ export async function directories(
   const windowsPrefix = prefix.replace(/\//g, "\\");
   const source = prefix
     ? `
-    SELECT relative_path,missing FROM files WHERE root_id=? AND relative_path>=? AND relative_path<?
+    SELECT relative_path,missing FROM files_visible WHERE root_id=? AND relative_path>=? AND relative_path<?
     UNION ALL
-    SELECT relative_path,missing FROM files WHERE root_id=? AND relative_path>=? AND relative_path<?
+    SELECT relative_path,missing FROM files_visible WHERE root_id=? AND relative_path>=? AND relative_path<?
   `
-    : "SELECT relative_path,missing FROM files WHERE root_id=?";
+    : "SELECT relative_path,missing FROM files_visible WHERE root_id=?";
   const sourceArgs = prefix
     ? [
         rootId,
@@ -57,7 +59,7 @@ export async function directories(
     hasChildren: number;
   }>;
   const rows = new Map(
-    indexed.filter((row) => !isDataPath(catalog.dataDir, path.join(root.path, ...relativePath.split("/"), row.name))).map((row) => [
+    indexed.filter((row) => !catalog.isManagedPath(path.join(root.path, ...relativePath.split("/"), row.name))).map((row) => [
       row.name,
       { ...row, hasChildren: !!row.hasChildren },
     ]),
@@ -79,7 +81,8 @@ export async function directories(
     for (const entry of await readdir(target, { withFileTypes: true })) {
       if (
         entry.isDirectory() &&
-        !isDataPath(catalog.dataDir, path.join(target, entry.name)) &&
+        !entry.name.startsWith(".") &&
+        !catalog.isManagedPath(path.join(target, entry.name)) &&
         !entry.isSymbolicLink() &&
         !rows.has(entry.name)
       )

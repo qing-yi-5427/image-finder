@@ -206,7 +206,7 @@ export class DanbooruQueue {
   list(limit = 100): DanbooruItem[] {
     return this.c.db
       .prepare(
-        "SELECT j.file_id fileId,f.relative_path relativePath,j.status,j.error,j.post_id postId,CASE WHEN j.status='done' THEN 'md5' ELSE NULL END matchedBy FROM danbooru_jobs j JOIN files f ON f.id=j.file_id ORDER BY j.updated_at DESC LIMIT ?",
+        "SELECT j.file_id fileId,f.relative_path relativePath,j.status,j.error,j.post_id postId,CASE WHEN j.status='done' THEN 'md5' ELSE NULL END matchedBy FROM danbooru_jobs j JOIN files_visible f ON f.id=j.file_id ORDER BY j.updated_at DESC LIMIT ?",
       )
       .all(Math.max(1, Math.min(limit, 500))) as DanbooruItem[];
   }
@@ -225,7 +225,7 @@ export class DanbooruQueue {
     return (
       this.c.db
         .prepare(
-          "SELECT f.id,f.relative_path,f.bytes,f.mtime_ms,j.status,j.bytes job_bytes,j.mtime_ms job_mtime FROM files f LEFT JOIN danbooru_jobs j ON j.file_id=f.id WHERE f.root_id=? AND f.missing=0",
+          "SELECT f.id,f.relative_path,f.bytes,f.mtime_ms,j.status,j.bytes job_bytes,j.mtime_ms job_mtime FROM files_visible f LEFT JOIN danbooru_jobs j ON j.file_id=f.id WHERE f.root_id=? AND f.missing=0",
         )
         .all(scope.rootId) as any[]
     ).filter((r) => {
@@ -340,7 +340,7 @@ export class DanbooruQueue {
   private async runOne() {
     const row = this.c.db
       .prepare(
-        "SELECT j.file_id FROM danbooru_jobs j JOIN files f ON f.id=j.file_id WHERE j.status='waiting' AND f.missing=0 ORDER BY j.updated_at,j.file_id LIMIT 1",
+        "SELECT j.file_id FROM danbooru_jobs j JOIN files_visible f ON f.id=j.file_id WHERE j.status='waiting' AND f.missing=0 ORDER BY j.updated_at,j.file_id LIMIT 1",
       )
       .get() as any;
     if (!row) {

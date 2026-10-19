@@ -317,7 +317,7 @@ export class LocalAi {
   status(): AiStatus {
     const db = this.catalog.db;
     const total = (
-      db.prepare("SELECT COUNT(*) n FROM files WHERE missing=0").get() as any
+      db.prepare("SELECT COUNT(*) n FROM files_visible WHERE missing=0").get() as any
     ).n;
     let stage = this.installState.stage;
     try {
@@ -382,7 +382,7 @@ export class LocalAi {
             counts[row.status as keyof typeof counts] = row.n;
         const runs = db
           .prepare(
-            "SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN i.bytes=f.bytes AND i.mtime_ms=f.mtime_ms THEN 1 ELSE 0 END),0) indexed_count FROM ai_runs r JOIN files f ON f.id=r.file_id LEFT JOIN ai_inputs i ON i.file_id=r.file_id AND i.kind=r.kind WHERE r.kind=? AND r.model_version=? AND f.missing=0",
+            "SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN i.bytes=f.bytes AND i.mtime_ms=f.mtime_ms THEN 1 ELSE 0 END),0) indexed_count FROM ai_runs r JOIN files_visible f ON f.id=r.file_id LEFT JOIN ai_inputs i ON i.file_id=r.file_id AND i.kind=r.kind WHERE r.kind=? AND r.model_version=? AND f.missing=0",
           )
           .get(kind, AI_MODELS[kind].version) as any;
         const indexed = runs.indexed_count;
@@ -735,7 +735,7 @@ export class LocalAi {
       : { general: 0.35, character: 0.85 };
     const autoPolicy = db
       .prepare(
-        `SELECT s.general_threshold,s.character_threshold FROM files f JOIN ai_auto_scopes s ON ${scopedFileSql()} WHERE f.id=? LIMIT 1`,
+        `SELECT s.general_threshold,s.character_threshold FROM files_visible f JOIN ai_auto_scopes s ON ${scopedFileSql()} WHERE f.id=? LIMIT 1`,
       )
       .get(fileId) as any;
     const autoIds = new Map(
@@ -882,7 +882,7 @@ export class LocalAi {
     const scores = new Map<string, number>();
     for (const row of this.catalog.db
       .prepare(
-        "SELECT v.*,r.input_fingerprint,f.bytes,f.mtime_ms mtimeMs,f.id FROM ai_vectors v JOIN ai_runs r ON r.file_id=v.file_id AND r.kind='semantic' AND r.model_version=v.model_version JOIN files f ON f.id=v.file_id WHERE v.model_version=? AND f.missing=0",
+        "SELECT v.*,r.input_fingerprint,f.bytes,f.mtime_ms mtimeMs,f.id FROM ai_vectors v JOIN ai_runs r ON r.file_id=v.file_id AND r.kind='semantic' AND r.model_version=v.model_version JOIN files_visible f ON f.id=v.file_id WHERE v.model_version=? AND f.missing=0",
       )
       .all(AI_MODELS.semantic.version) as any[]) {
       if (

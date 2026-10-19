@@ -1,3 +1,4 @@
+import {hasDotDirectory} from "./directory-policy.js";
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -87,12 +88,12 @@ export async function safeResolve(
   }
   if (!contained(actualRoot, actualFile))
     throw new Error("Original escapes library root");
-  if (isDataPath(catalog.dataDir, actualFile))
+  if (catalog.isManagedPath(actualFile))
     throw new Error("Data files are not originals");
   const info = await stat(actualFile);
   if (!info.isFile()) throw new Error("Original is not a regular file");
   const indexed = catalog.db
-    .prepare("SELECT identity FROM files WHERE id=?")
+    .prepare("SELECT identity FROM files_visible WHERE id=?")
     .get(fileId) as { identity: string | null };
   if (
     info.size !== file.bytes ||
@@ -124,7 +125,8 @@ export class Scanner {
       elapsedMs: 0,
     };
     const root = this.catalog.getRoot(rootId);
-    const excluded = dataPathExclusion(this.catalog.dataDir);
+    const excluded = this.catalog.managedPathExclusion();
+    if(hasDotDirectory(root.path))throw new Error("EXCLUDED_DIRECTORY");
     if (excluded(root.path))
       throw new Error("SOURCE_DATA_OVERLAP");
     const scanId = randomUUID();
@@ -145,7 +147,7 @@ export class Scanner {
       };
     }
     const existing = this.catalog.db.prepare(
-      "SELECT * FROM files WHERE root_id=? AND relative_path=?",
+      "SELECT * FROM files_visible WHERE root_id=? AND relative_path=?",
     );
     const insert = this.catalog.db.prepare(
       `INSERT INTO files(id,root_id,relative_path,bytes,mtime_ms,identity,added_at,last_seen_scan,missing,artwork_id,page,candidate_artwork_id,format) VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?)`,
@@ -180,6 +182,7 @@ export class Scanner {
         // Never follow junctions or symbolic links into another tree.
         if (entry.isSymbolicLink()) continue;
         if (entry.isDirectory()) {
+          if(entry.name.startsWith("."))continue;
           queue.push(absolute);
           continue;
         }
@@ -202,7 +205,7 @@ export class Scanner {
           if (!old && info.nlink === 1 && info.ino !== 0) {
             const candidates = this.catalog.db
               .prepare(
-                "SELECT id,relative_path,bytes,mtime_ms,identity FROM files WHERE root_id=? AND identity=? AND bytes=? AND mtime_ms=?",
+                "SELECT id,relative_path,bytes,mtime_ms,identity FROM files_visible WHERE root_id=? AND identity=? AND bytes=? AND mtime_ms=?",
               )
               .all(rootId, identity, info.size, info.mtimeMs) as Array<{
               id: string;
@@ -346,15 +349,16 @@ export class Scanner {
       throw new Error(
         `当前关联的是 ${root.path}；所选 ${target} 是它的子文件夹。请选原目录根文件夹，重新定位用于关联整个原目录移动后的新位置。原有索引已保留。`,
       );
+    for(const row of this.catalog.db.prepare("SELECT relative_path FROM files WHERE root_id=?").all(rootId) as any[])if(String(row.relative_path).replace(/\\/g,"/").split("/").some(p=>p===".."))throw new Error("路径超出原目录");
     // Require three matches (or every not-yet-missing row in a smaller library).
     // Read bounded batches before awaiting filesystem I/O; never retain an active
     // SQLite cursor while another service operation can use the connection.
     const count = this.catalog.db
-      .prepare("SELECT COUNT(*) n FROM files WHERE root_id=? AND missing=0")
+      .prepare("SELECT COUNT(*) n FROM files_visible WHERE root_id=? AND missing=0")
       .get(rootId) as { n: number };
     const required = Math.min(3, count.n);
     const batch = this.catalog.db.prepare(
-      "SELECT relative_path,bytes,mtime_ms FROM files WHERE root_id=? AND missing=0 AND (? IS NULL OR relative_path>?) ORDER BY relative_path LIMIT 128",
+      "SELECT relative_path,bytes,mtime_ms FROM files_visible WHERE root_id=? AND missing=0 AND (? IS NULL OR relative_path>?) ORDER BY relative_path LIMIT 128",
     );
     let after: string | null = null;
     let matched = 0;

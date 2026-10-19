@@ -1,4 +1,5 @@
-import { watch, type FSWatcher } from "node:fs";
+import {isExcludedImagePath} from "./directory-policy.js";
+import { watch, lstatSync, type FSWatcher } from "node:fs";
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import type { Catalog } from "./catalog.js";
 import type { Scanner } from "./filesystem.js";
@@ -23,7 +24,7 @@ export class LocalTasks {
     this.state.pendingRoots=[];
     for(const rootId of roots)this.catalog.db.prepare("INSERT OR IGNORE INTO local_cancelled_roots VALUES(?)").run(rootId);
     this.controller.abort();
-    this.catalog.db.prepare("INSERT OR REPLACE INTO local_cancelled_images SELECT id,bytes,mtime_ms FROM files WHERE missing=0 AND processing_error IS NULL AND ((thumbnail_key IS NULL AND cache_evicted=0) OR feature_version IS NULL OR feature_version<>?)").run(ALGORITHM_VERSION);
+    this.catalog.db.prepare("INSERT OR REPLACE INTO local_cancelled_images SELECT id,bytes,mtime_ms FROM files_visible WHERE missing=0 AND processing_error IS NULL AND ((thumbnail_key IS NULL AND cache_evicted=0) OR feature_version IS NULL OR feature_version<>?)").run(ALGORITHM_VERSION);
     for(const list of this.waiters.values())for(const waiter of list)waiter.reject(new Error('LOCAL_TASK_CANCELLED'));
     this.waiters.clear();this.emit();
     await this.worker;
@@ -94,7 +95,7 @@ export class LocalTasks {
   status(): LocalTaskStatus {
     const counts = this.catalog.db
       .prepare(
-        `SELECT SUM(CASE WHEN missing=0 AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM local_cancelled_images x WHERE x.file_id=files.id AND x.bytes=files.bytes AND x.mtime_ms=files.mtime_ms) AND ((thumbnail_key IS NULL AND cache_evicted=0) OR feature_version IS NULL OR feature_version<>?) THEN 1 ELSE 0 END) pending,SUM(CASE WHEN thumbnail_key IS NOT NULL AND feature_version=? THEN 1 ELSE 0 END) ready,SUM(CASE WHEN processing_error IS NOT NULL THEN 1 ELSE 0 END) failed FROM files`,
+        `SELECT SUM(CASE WHEN missing=0 AND processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM local_cancelled_images x WHERE x.file_id=files.id AND x.bytes=files.bytes AND x.mtime_ms=files.mtime_ms) AND ((thumbnail_key IS NULL AND cache_evicted=0) OR feature_version IS NULL OR feature_version<>?) THEN 1 ELSE 0 END) pending,SUM(CASE WHEN thumbnail_key IS NOT NULL AND feature_version=? THEN 1 ELSE 0 END) ready,SUM(CASE WHEN processing_error IS NOT NULL THEN 1 ELSE 0 END) failed FROM files_visible files`,
       )
       .get(ALGORITHM_VERSION, ALGORITHM_VERSION) as {
       pending: number;
@@ -132,7 +133,9 @@ export class LocalTasks {
       try {
         const watcher = watch(root.path, { recursive: true }, (_event, filename) => {
           // Database/WAL/cache writes must not trigger a reconciliation loop.
-          if (filename && isDataPath(this.catalog.dataDir, path.join(root.path, String(filename)))) return;
+          if(filename&&isExcludedImagePath(String(filename)))return;
+          if(filename&&path.basename(String(filename)).startsWith(".")){try{if(lstatSync(path.join(root.path,String(filename))).isDirectory())return;}catch{}}
+          if (filename && this.catalog.isManagedPath(path.join(root.path, String(filename)))) return;
           const previous = this.debounce.get(root.id);
           if (previous) clearTimeout(previous);
           const timer = setTimeout(() => {
@@ -178,7 +181,7 @@ export class LocalTasks {
     if (this.closed) return Promise.reject(new Error("Local tasks closed"));
     this.catalog.getRoot(rootId);
     this.catalog.db.prepare("DELETE FROM local_cancelled_roots WHERE root_id=?").run(rootId);
-    this.catalog.db.prepare("DELETE FROM local_cancelled_images WHERE file_id IN (SELECT id FROM files WHERE root_id=?)").run(rootId);
+    this.catalog.db.prepare("DELETE FROM local_cancelled_images WHERE file_id IN (SELECT id FROM files_visible WHERE root_id=?)").run(rootId);
     // Manual bounded acceptance scans are serialized with the same owning worker.
     if (options.limit !== undefined) return this.boundedScan(rootId, options);
     const result = new Promise<ScanResult>((resolve, reject) => {

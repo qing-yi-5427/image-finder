@@ -53,6 +53,7 @@ const service = new ImageFinderService(process.argv[2], {
   fetcher,
   sauceRequest,
   startPaused: process.argv.includes("--start-paused"),
+  cachePreferenceFile: process.argv.find((argument) => argument.startsWith("--cache-preferences="))?.slice("--cache-preferences=".length),
 });
 process.on("message", async (message: any) => {
   if (message?.kind === "sauce-response") {

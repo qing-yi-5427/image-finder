@@ -200,6 +200,10 @@ route(
   },
   [],
 );
+route("cache.status");
+route("cache.select");
+route("cache.initialize",{directory:str,configurationError:str},["directory"]);
+route("cache.configure",{directory:str});
 route("library.add", { directory: str });
 route("library.remove", { rootId: str });
 route("library.relocate", { rootId: str, directory: str });
@@ -435,6 +439,8 @@ export function validateInvocation(
   if (
     !options.privileged &&
     [
+      "cache.initialize",
+      "cache.configure",
       "images.resolve",
       "ai.prepareCleanup",
       "ai.finishCleanup",

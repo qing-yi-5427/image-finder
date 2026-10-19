@@ -204,7 +204,7 @@ export class SauceQueue {
     return (
       this.c.db
         .prepare(
-          "SELECT j.*,f.relative_path FROM sauce_jobs j JOIN files f ON f.id=j.file_id ORDER BY updated_at DESC LIMIT ?",
+          "SELECT j.*,f.relative_path FROM sauce_jobs j JOIN files_visible f ON f.id=j.file_id ORDER BY updated_at DESC LIMIT ?",
         )
         .all(Math.max(1, Math.min(limit, 500))) as any[]
     ).map((r) => ({
@@ -221,7 +221,7 @@ export class SauceQueue {
     const prefix = dir ? dir + "/" : "";
     const rows = this.c.db
       .prepare(
-        "SELECT id,relative_path FROM files WHERE root_id=? AND missing=0 AND artwork_id IS NULL",
+        "SELECT id,relative_path FROM files_visible WHERE root_id=? AND missing=0 AND artwork_id IS NULL",
       )
       .all(scope.rootId) as any[];
     let added = 0;
@@ -303,7 +303,7 @@ export class SauceQueue {
     const generation=this.generation;
     const row = this.c.db
       .prepare(
-        "SELECT j.file_id FROM sauce_jobs j JOIN files f ON f.id=j.file_id WHERE j.status='waiting' AND f.missing=0 AND f.artwork_id IS NULL ORDER BY j.updated_at,j.file_id LIMIT 1",
+        "SELECT j.file_id FROM sauce_jobs j JOIN files_visible f ON f.id=j.file_id WHERE j.status='waiting' AND f.missing=0 AND f.artwork_id IS NULL ORDER BY j.updated_at,j.file_id LIMIT 1",
       )
       .get() as any;
     if (!row) {

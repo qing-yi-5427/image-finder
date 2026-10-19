@@ -1,3 +1,4 @@
+import {ThumbnailCache} from "./thumbnail-cache.js";
 import { taskOverview } from "./task-overview.js";
 import { DanbooruQueue, type DanbooruReply } from "./danbooru.js";
 import path from "node:path";
@@ -16,6 +17,7 @@ import { directories } from "./directories.js";
 /** Lives exclusively in the service process. The renderer receives DTOs only. */
 export class ImageFinderService {
   readonly catalog: Catalog;
+  readonly cache: ThumbnailCache;
   readonly scanner: Scanner;
   readonly images: ImageProcessor;
   queue: PixivQueue;
@@ -36,6 +38,7 @@ export class ImageFinderService {
   constructor(
     readonly dataDir: string,
     private options: {
+      cachePreferenceFile?:string;
       fetcher?: Fetcher;
       startPaused?: boolean;
       danbooruRequest?: (
@@ -46,6 +49,7 @@ export class ImageFinderService {
     } = {},
   ) {
     this.catalog = new Catalog(dataDir);
+    this.cache=new ThumbnailCache(this.catalog,options.cachePreferenceFile);
     this.scanner = new Scanner(this.catalog);
     this.images = new ImageProcessor(this.catalog, dataDir);
     this.queue = new PixivQueue(this.catalog, { fetcher: options.fetcher });
@@ -69,7 +73,7 @@ export class ImageFinderService {
       this.ai.pause("semantic");
     }
     this.queue.start();
-    void this.local.start();
+    if(!options.cachePreferenceFile)void this.local.start();
     this.catalog.db.exec(
       "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
     );
@@ -80,6 +84,7 @@ export class ImageFinderService {
       .get() as any;
     return {
       dataDir: path.resolve(this.dataDir),
+      dataDirectoryWarning:this.catalog.dataDirectoryWarning,
       cacheLimitBytes: row ? Number(row.value) : 5 * 1024 ** 3,
     };
   }
@@ -91,6 +96,8 @@ export class ImageFinderService {
       return Promise.reject(error);
     }
     const exclusive = [
+      "cache.initialize",
+      "cache.configure",
       "library.add",
       "library.remove",
       "library.relocate",
@@ -121,7 +128,7 @@ export class ImageFinderService {
     const file = this.catalog.getFile(fileId);
     if (!file.thumbnailKey || !/^[a-f0-9]{64}\.webp$/.test(file.thumbnailKey))
       return null;
-    const cached = path.join(this.dataDir, "thumbnails", file.thumbnailKey);
+    const cached = path.join(this.catalog.cacheDirectory, file.thumbnailKey);
     try {
       return (await stat(cached)).isFile() ? { path: cached } : null;
     } catch {
@@ -139,7 +146,7 @@ export class ImageFinderService {
         if (ready) return ready;
         const feature = await this.images.process(fileId);
         return {
-          path: path.join(this.dataDir, "thumbnails", feature.thumbnailKey),
+          path: path.join(this.catalog.cacheDirectory, feature.thumbnailKey),
         };
       }),
     );
@@ -154,6 +161,14 @@ export class ImageFinderService {
     const c = this.catalog,
       p = payload;
     switch (method) {
+      case "cache.status":return this.cache.status();
+      case "cache.initialize":
+      case "cache.configure": {
+        const result=await this.cache.configure(p.directory,method==="cache.configure",p.configurationError);
+        this.images.invalidateCacheSize();
+        if(method==="cache.initialize"&&this.options.cachePreferenceFile)await this.local.start();
+        return result;
+      }
       case "ai.prepareCleanup":return this.ai.prepareCleanup();
       case "ai.finishCleanup":return this.ai.finishCleanup();
       case "tasks.cancel":
@@ -476,10 +491,10 @@ export class ImageFinderService {
       }
       case "system.clearCache": {
         this.images.invalidateCacheSize();
-        const directory = path.join(this.dataDir, "thumbnails");
+        const directory = this.catalog.cacheDirectory;
         await mkdir(directory, { recursive: true });
         for (const entry of await readdir(directory)) {
-          if (!entry.includes("/") && !entry.includes("\\"))
+          if (/^[a-f0-9]{64}\.webp$/.test(entry))
             await rm(path.join(directory, entry), {
               force: true,
               recursive: false,
