@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, mkdir, readFile, writeFile, symlink, access } from "node:fs/promises";
-import { AiEnvironment, markManagedAiHome } from "../src/electron/ai-environment.js";
+import { AiEnvironment, markManagedAiHome, isOwnedAiHome } from "../src/electron/ai-environment.js";
 
 async function fixture() {
   const base = await mkdtemp(path.join(tmpdir(), "image-finder-environment-"));
@@ -66,4 +66,22 @@ test("managed ownership cannot be established through a junction used as the run
   const environment = new AiEnvironment(alias, alias, path.join(base, "catalog"));
   assert.equal((await environment.inspect()).cleanupSupported, false);
   await assert.rejects(environment.clear(), /链接/);
+});
+test("configured hidden AI leaf inside an original root is owned and can clear only its own assets", async () => {
+  const base = await mkdtemp(path.join(tmpdir(), "image-finder-custom-ai-"));
+  const originals = path.join(base, "originals"), catalog = path.join(base, "catalog");
+  await mkdir(originals); await mkdir(catalog);
+  const home = path.join(originals, ".image-finder-ai");
+  assert.equal(await isOwnedAiHome(home), false);
+  await markManagedAiHome(home, home);
+  assert.equal(await isOwnedAiHome(home), true);
+  await mkdir(path.join(home, "models"));
+  await writeFile(path.join(home, "models", "temporary-model"), "model");
+  await writeFile(path.join(originals, "original.png"), "original");
+  const environment = new AiEnvironment(home, home, catalog);
+  assert.equal((await environment.inspect([originals])).cleanupSupported, true);
+  await environment.clear([originals]);
+  assert.equal(await readFile(path.join(originals, "original.png"), "utf8"), "original");
+  await assert.rejects(access(path.join(home, "models")));
+  assert.equal(await isOwnedAiHome(home), true);
 });

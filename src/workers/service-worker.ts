@@ -54,6 +54,7 @@ const service = new ImageFinderService(process.argv[2], {
   sauceRequest,
   startPaused: process.argv.includes("--start-paused"),
   cachePreferenceFile: process.argv.find((argument) => argument.startsWith("--cache-preferences="))?.slice("--cache-preferences=".length),
+  aiHomePreferenceFile: process.argv.find((argument) => argument.startsWith("--ai-home-preferences="))?.slice("--ai-home-preferences=".length),
 });
 process.on("message", async (message: any) => {
   if (message?.kind === "sauce-response") {

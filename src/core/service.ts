@@ -38,6 +38,7 @@ export class ImageFinderService {
   constructor(
     readonly dataDir: string,
     private options: {
+      aiHomePreferenceFile?:string;
       cachePreferenceFile?:string;
       fetcher?: Fetcher;
       startPaused?: boolean;
@@ -169,6 +170,7 @@ export class ImageFinderService {
         if(method==="cache.initialize"&&this.options.cachePreferenceFile)await this.local.start();
         return result;
       }
+      case "ai.configureHome": {if(!this.options.aiHomePreferenceFile)throw new Error("AI环境位置配置不可用");return this.ai.configureHome(p.directory,this.options.aiHomePreferenceFile);}
       case "ai.prepareCleanup":return this.ai.prepareCleanup();
       case "ai.finishCleanup":return this.ai.finishCleanup();
       case "tasks.cancel":
@@ -479,7 +481,7 @@ export class ImageFinderService {
           this.queue.start();
 
           this.local = new LocalTasks(c, this.scanner, this.images);
-          this.ai = new LocalAi(c);
+          this.ai = new LocalAi(c,{home:this.ai.home});
           void this.local.start();
         }
         return {

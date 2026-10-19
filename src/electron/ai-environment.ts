@@ -35,6 +35,13 @@ export async function markManagedAiHome(home: string, expected: string) {
   try { await writeFile(path.join(home, marker), ownership, { flag: "wx" }); }
   catch (error: any) { if (error.code !== "EEXIST") throw error; }
 }
+export async function isOwnedAiHome(home: string) {
+  try {
+    const root = await lstat(home), entry = await lstat(path.join(home, marker));
+    return root.isDirectory() && !root.isSymbolicLink() && entry.isFile() && !entry.isSymbolicLink() &&
+      await readFile(path.join(home, marker), "utf8") === ownership;
+  } catch { return false; }
+}
 
 export class AiEnvironment {
   constructor(readonly home: string, private expected: string, private catalog: string) {}
@@ -53,9 +60,15 @@ export class AiEnvironment {
       if ((await lstat(path.join(this.home, marker))).isSymbolicLink() || await readFile(path.join(this.home, marker), "utf8") !== ownership)
         throw new Error("AI 目录缺少有效的应用管理标记");
       const actualHome = await realpath(this.home);
-      for (const protectedPath of [this.catalog, ...protectedPaths]) {
+      const catalogPath = await realpath(this.catalog).catch(() => path.resolve(this.catalog));
+      if (overlaps(actualHome, catalogPath)) throw new Error("AI 目录与图库数据库目录重叠，不能清理");
+      for (const protectedPath of protectedPaths) {
         const actualProtected = await realpath(protectedPath).catch(() => path.resolve(protectedPath));
-        if (overlaps(actualHome, actualProtected)) throw new Error("AI 目录与图库或原图目录重叠，不能清理");
+        const hiddenManagedLeaf = path.basename(actualHome).toLowerCase() === ".image-finder-ai";
+        const relative = path.relative(actualHome, actualProtected);
+        const containsSource = relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+        if (containsSource || (!hiddenManagedLeaf && overlaps(actualHome, actualProtected)))
+          throw new Error("AI 目录与原图目录重叠，不能清理");
       }
       managed = true;
     } catch (cause) { error = cause instanceof Error ? cause.message : "无法检查 AI 环境"; }

@@ -1,3 +1,4 @@
+import {migrateAiHome} from "./ai-home.js";
 import {
   WD_AUTO_MODEL_ID,
   WD_AUTO_MODEL_VERSION,
@@ -176,9 +177,10 @@ class PythonRuntime implements Runtime {
   }
 }
 export class LocalAi {
-  readonly home: string;
+  home: string;
   get python(){const nested=path.join(this.home,'python','cpython-3.12.13-windows-x86_64-none','python.exe');return existsSync(nested)?nested:path.join(this.home,'python','python.exe');}
   private runtime: Runtime;
+  private runtimeFactory:(home:string,python:()=>string)=>Runtime;
   private timer: NodeJS.Timeout;
   private closing = false;
   private active = new Map<AiKind, string>();
@@ -186,14 +188,30 @@ export class LocalAi {
   private work = new Set<Promise<void>>();
   private generations = {wd:0,semantic:0};
   private maintenance=false;
+  private homeUnavailable=false;
   private searches=0;
-  private requireAvailable(){if(this.maintenance)throw new Error('AI_ENVIRONMENT_MAINTENANCE');}
+  private requireAvailable(){if(this.homeUnavailable)throw new Error('AI_HOME_UNAVAILABLE');if(this.maintenance)throw new Error('AI_ENVIRONMENT_MAINTENANCE');}
   prepareCleanup(){
     if(this.maintenance||this.installer||this.installState.running||this.work.size||this.searches||this.catalog.db.prepare("SELECT 1 FROM ai_jobs j JOIN ai_state s ON s.kind=j.kind WHERE s.paused=0 AND j.status IN ('waiting','running') LIMIT 1").get())throw new Error('AI_ENVIRONMENT_BUSY');
     this.maintenance=true;
     try{if(this.runtime.closeForMaintenance)return this.runtime.closeForMaintenance().then(()=>({ready:true})).catch(error=>{this.maintenance=false;throw error;});this.runtime.close();return {ready:true};}catch(error){this.maintenance=false;throw error;}
   }
   finishCleanup(){this.maintenance=false;return {ready:true};}
+  async configureHome(directory:string,preferenceFile:string){
+    this.requireAvailable();
+    await this.prepareCleanup();
+    try{
+      const result=await migrateAiHome(this.home,directory,preferenceFile,[this.catalog.dataDir,...this.catalog.roots().map(root=>root.path)]);
+      this.home=result.directory;
+      this.homeUnavailable=false;
+      delete process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED;
+      this.runtime=this.runtimeFactory(this.home,()=>this.python);
+      this.dictionary.clear();this.loadDictionary();
+      this.installState={running:false,stage:"环境位置已更新",error:null};
+      return result;
+    }finally{this.finishCleanup();}
+  }
+
   async cancel(kind:AiKind) {
     this.generations[kind]++;
     this.pause(kind);
@@ -214,8 +232,9 @@ export class LocalAi {
   private dictionary = new Map<string, string>();
   constructor(
     readonly catalog: Catalog,
-    options: { home?: string; runtime?: Runtime } = {},
+    options: { home?: string; runtime?: Runtime; runtimeFactory?:(home:string,python:()=>string)=>Runtime } = {},
   ) {
+    this.homeUnavailable=process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED==="1";
     const repository = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../../..",
@@ -232,7 +251,7 @@ export class LocalAi {
     const scripts =
       process.env.IMAGE_FINDER_AI_SCRIPTS ?? path.join(repository, "scripts");
     try {
-      if (existsSync(scripts)) {
+      if (!this.homeUnavailable&&existsSync(scripts)) {
         mkdirSync(this.home, { recursive: true });
         for (const name of [
           "ai-worker.py",
@@ -261,7 +280,7 @@ export class LocalAi {
     );
     try {
       if (
-        existsSync(bundledDictionary) &&
+        !this.homeUnavailable&&existsSync(bundledDictionary) &&
         !existsSync(path.join(this.home, "wd-translations.json"))
       )
         copyFileSync(
@@ -269,7 +288,8 @@ export class LocalAi {
           path.join(this.home, "wd-translations.json"),
         );
     } catch {}
-    this.runtime = options.runtime ?? new PythonRuntime(this.home, ()=>this.python);
+    this.runtimeFactory=options.runtimeFactory??((home,python)=>new PythonRuntime(home,python));
+    this.runtime = options.runtime ?? this.runtimeFactory(this.home, ()=>this.python);
     catalog.db.exec(`
       CREATE TABLE IF NOT EXISTS ai_state(kind TEXT PRIMARY KEY,paused INTEGER NOT NULL DEFAULT 1);
       CREATE TABLE IF NOT EXISTS ai_config(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -300,6 +320,7 @@ export class LocalAi {
     };
   }
   private loadDictionary() {
+    if(this.homeUnavailable)return;
     try {
       const dictionary = JSON.parse(
         readFileSync(path.join(this.home, "wd-translations.json"), "utf8"),
@@ -362,6 +383,7 @@ export class LocalAi {
           })
         )
           filesMissing.push("models-ready.json（需要完整性校验）");
+        if(this.homeUnavailable)filesMissing.push("AI环境位置不可用，请重新连接原位置后重启程序");
         return {
           kind,
           id: model.id,
@@ -598,7 +620,7 @@ export class LocalAi {
     return work;
   }
   private schedule() {
-    if (this.closing||this.maintenance) return;
+    if (this.closing||this.maintenance||this.homeUnavailable) return;
     for (const kind of kinds) {
       if (this.active.has(kind)) continue;
       const state = this.catalog.db

@@ -1,6 +1,7 @@
 import { AppTray, trayIconPath } from "./tray.js";
 import { NativeFileDrag } from "./file-drag.js";
-import { AiEnvironment, markManagedAiHome } from "./ai-environment.js";
+import { AiEnvironment, markManagedAiHome, isOwnedAiHome } from "./ai-environment.js";
+import { readAiHomePreferences } from "./ai-preferences.js";
 import { readCachePreferences } from "./cache-preferences.js";
 import { CacheOperationGate } from "./cache-gate.js";
 import { trayPauseActions, type TrayTaskSnapshot } from "./tray-actions.js";
@@ -92,7 +93,20 @@ void app.whenReady().then(async () => {
   let trayCanPause = false;
   const syncTray = (force=false) => {appTray.update({power:powerPreference.status(),canPause:trayCanPause},force);sendPower();};
   const setPower = async (enabled:boolean) => {try{return await powerPreference.setEnabled(enabled);}finally{syncTray(true);}};
-  if (app.isPackaged && !process.env.IMAGE_FINDER_AI_HOME) {
+  const aiHomePreferenceFile = join(app.getPath("userData"), "ai-location.json");
+  const aiHomePreference = await readAiHomePreferences(aiHomePreferenceFile);
+  const inheritedAiHome = process.env.IMAGE_FINDER_AI_HOME;
+  const defaultManagedAiHome = join(app.getPath("userData"), "ai-runtime");
+  let expectedManagedAiHome = inheritedAiHome ? defaultManagedAiHome : aiHomePreference.directory ?? defaultManagedAiHome;
+  let aiLocationWarning = inheritedAiHome ? null : aiHomePreference.configurationError;
+  if (!inheritedAiHome && aiHomePreference.directory) {
+    process.env.IMAGE_FINDER_AI_HOME = aiHomePreference.directory;
+    if (!await isOwnedAiHome(aiHomePreference.directory)) {
+      process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED = "1";
+      aiLocationWarning = "配置的 AI 环境位置不可用或管理标记无效，未自动切换或写入其他目录；请检查原位置，重新连接后重启应用。";
+    }
+  }
+  if (app.isPackaged && !inheritedAiHome) {
     const bundled = join(process.resourcesPath, "ai-runtime");
     const offline = [
       "models/wd/model.onnx", "models/wd/selected_tags.csv",
@@ -102,14 +116,19 @@ void app.whenReady().then(async () => {
       existsSync(join(bundled, "python", "python.exe")) ||
       existsSync(join(bundled, "python", "cpython-3.12.13-windows-x86_64-none", "python.exe"))
     );
-    const aiHome = offline ? bundled : join(app.getPath("userData"), "ai-runtime");
-    if (!offline) {
-      await mkdir(aiHome, { recursive: true });
-      await cp(bundled, aiHome, { recursive: true, force: false });
-      // Refresh bundled helpers on application upgrades; preserve downloaded models.
-      for (const name of ["ai-install.mjs", "ai-download.mjs", "ai-manifest.json", "ai-worker.py", "ai-export.py", "ai-verify.py", "ai-translation.py"])
-        await cp(join(bundled, name), join(aiHome, name), { force: true });
-      await markManagedAiHome(aiHome, join(app.getPath("userData"), "ai-runtime")).catch(() => {});
+    const aiHome = aiHomePreference.directory ?? (offline ? bundled : defaultManagedAiHome);
+    if (aiHome !== bundled && process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED !== "1") {
+      try {
+        await mkdir(aiHome, { recursive: true });
+        await cp(bundled, aiHome, { recursive: true, force: false });
+        // Refresh bundled helpers on application upgrades; preserve downloaded models.
+        for (const name of ["ai-install.mjs", "ai-download.mjs", "ai-manifest.json", "ai-worker.py", "ai-export.py", "ai-verify.py", "ai-translation.py"])
+          await cp(join(bundled, name), join(aiHome, name), { force: true });
+        if (!aiHomePreference.directory) await markManagedAiHome(aiHome, defaultManagedAiHome);
+      } catch {
+        process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED = "1";
+        aiLocationWarning = "AI 环境目录不可写或资源不可用，已保留当前配置；请检查磁盘与目录权限后重启应用。";
+      }
     }
     process.env.IMAGE_FINDER_AI_HOME = aiHome;
   }
@@ -159,6 +178,7 @@ void app.whenReady().then(async () => {
     {
       startPaused: process.argv.includes("--start-paused"),
       cachePreferenceFile,
+      aiHomePreferenceFile,
       sauceRequest: (preview) => sauceNetwork.request(preview),
     },
   );
@@ -248,19 +268,40 @@ void app.whenReady().then(async () => {
       return cacheGate.change(() => host.invoke("cache.configure", { directory }));
     }
     if (aiCleaning && method.startsWith("ai.") && !["ai.status", "ai.environment"].includes(method))
-      throw new Error("AI 环境正在清理，请稍后重试");
+      throw new Error("AI 环境正在维护，请稍后重试");
     if (aiCleaning && ["library.add", "library.relocate"].includes(method))
-      throw new Error("AI 环境正在清理，请稍后调整图库目录");
+      throw new Error("AI 环境正在维护，请稍后调整图库目录");
+    if (method === "ai.environmentSelect") {
+      aiCleaning = true;
+      try {
+        const selected = await dialog.showOpenDialog(window, {
+          title: "选择 AI 环境存放位置（将在所选目录下创建独立隐藏文件夹）",
+          properties: ["openDirectory"],
+        });
+        if (selected.canceled || !selected.filePaths[0]) return null;
+        const result = await host.invoke("ai.configureHome", {
+          directory: join(await realpath(selected.filePaths[0]), ".image-finder-ai"),
+        });
+        process.env.IMAGE_FINDER_AI_HOME = result.directory;
+        delete process.env.IMAGE_FINDER_AI_BOOTSTRAP_DISABLED;
+        expectedManagedAiHome = result.directory;
+        aiLocationWarning = result.warning;
+        return result;
+      } finally { aiCleaning = false; }
+    }
     if (["ai.environment", "ai.environmentClear"].includes(method)) {
       const clearing = method === "ai.environmentClear";
       if (clearing) aiCleaning = true;
       let prepared = false;
       try {
         const state = await host.invoke("ai.status", {});
-        const environment = new AiEnvironment(state.home, join(app.getPath("userData"), "ai-runtime"), dataDir);
+        const environment = new AiEnvironment(state.home, expectedManagedAiHome, dataDir);
         const roots = await host.invoke("library.list", {});
         const protectedPaths = roots.map((root: any) => root.path);
-        if (!clearing) return await environment.inspect(protectedPaths);
+        if (!clearing) {
+          const result = await environment.inspect(protectedPaths);
+          return { ...result, error: [result.error, aiLocationWarning].filter(Boolean).join("；") || null };
+        }
         const allowed = await environment.inspect(protectedPaths);
         if (!allowed.cleanupSupported) throw new Error(allowed.error ?? "AI 环境不支持清理");
         await host.invoke("ai.prepareCleanup", {});

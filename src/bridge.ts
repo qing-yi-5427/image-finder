@@ -233,6 +233,8 @@ route(
 route("files.detail", { fileId: str });
 route("app.version", {});
 route("tasks.cancel", {kind:one(["pixiv","wd","semantic","danbooru","sauce","local"])});
+route("ai.environmentSelect",{});
+route("ai.configureHome",{directory:str});
 route("ai.environment",{});
 route("ai.environmentClear",{});
 route("ai.prepareCleanup",{});
@@ -442,6 +444,7 @@ export function validateInvocation(
       "cache.initialize",
       "cache.configure",
       "images.resolve",
+      "ai.configureHome",
       "ai.prepareCleanup",
       "ai.finishCleanup",
       "files.trashCommitted",

@@ -11,6 +11,8 @@ export function AiEnvironmentSettings({ notify }: { notify: Notify }) {
   const [environment, setEnvironment] = useState<Environment | null>(null);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [locationHint, setLocationHint] = useState("");
   const wasInstalling = useRef(false);
   const [confirm, setConfirm] = useState(false);
   const [general, setGeneral] = useState("0.55"), [character, setCharacter] = useState("0.85");
@@ -42,6 +44,18 @@ export function AiEnvironmentSettings({ notify }: { notify: Notify }) {
       {status.install.error && <p className="if-ai-error" role="alert">{status.install.error}</p>}
       <div className="if-ai-environment-models">{status.models.map(model => <div key={model.kind}><strong>{model.kind === "wd" ? "WD 标签" : "中文语义"} · {model.ready ? "已就绪" : "未就绪"}</strong><p>{model.id} · {model.version}</p>{model.filesMissing.length > 0 && <p>缺少：{model.filesMissing.join("、")}</p>}</div>)}</div>
       <div className="if-ai-provider"><Button disabled={locked} onClick={() => void act(() => api.invoke("ai.install", {}))}>{status.install.running ? "正在安装…" : "安装或修复 AI 环境"}</Button><Button variant="danger" disabled={locked || !environment.cleanupSupported} onClick={() => setConfirm(true)}>清理环境与模型</Button></div>
+      <div className="if-ai-provider"><Button disabled={locked} onClick={() => void act(async () => {
+        setMoving(true);
+        try {
+          const selected = await api.invoke("ai.environmentSelect", {});
+          if (!selected) return;
+          setLocationHint(`新位置已生效，旧环境仍保留在：${selected.previousDirectory}`);
+          if (selected.warning) notify(`AI 环境位置已更新，请查看提示：${selected.warning}`, undefined, "error");
+          else notify("AI 环境位置已更新，旧环境已保留");
+        } finally { setMoving(false); }
+      })}>{moving ? "正在复制与校验…" : "选择 AI 环境位置"}</Button></div>
+      <p className="if-ai-hint">在所选位置创建独立隐藏的 .image-finder-ai 文件夹，复制并校验当前环境后立即切换；旧环境保留，图库与原图位置不变。安装或分析运行时不能切换。</p>
+      {locationHint && <p className="if-ai-hint" role="status">{locationHint}</p>}
       <p className="if-ai-hint">{environment.cleanupSupported ? "清理仅移除独立运行环境与模型，之后可重新安装。安装、分析或语义搜索运行时不可清理。" : "此环境随应用或外部配置管理，不支持在此清理；请通过对应安装或目录管理方式处理。"}</p>
       <form className="if-ai-config" onSubmit={e => { e.preventDefault(); void act(() => api.invoke("ai.configure", { generalThreshold: Number(general), characterThreshold: Number(character) })); }}>
         <label>一般标签分析阈值<input className="if-input" aria-label="一般标签分析阈值" type="number" min="0" max="1" step="0.01" value={general} onChange={e => setGeneral(e.target.value)} required /></label><label>角色分析阈值<input className="if-input" aria-label="角色分析阈值" type="number" min="0" max="1" step="0.01" value={character} onChange={e => setCharacter(e.target.value)} required /></label><Button type="submit" disabled={locked}>保存分析阈值</Button>

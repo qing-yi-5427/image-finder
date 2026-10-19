@@ -50,6 +50,7 @@ type Empty = Record<string, never>;
 export interface MethodMap extends importAiMethodMap {
   "ai.environment": Route<Empty,{home:string;managed:boolean;cleanupSupported:boolean;bytes:number|null;error:string|null}>;
   "ai.environmentClear": Route<Empty,{clearedBytes:number}>;
+  "ai.environmentSelect": Route<Empty,{directory:string;previousDirectory:string;sourceRetained:true;copiedBytes:number;reusedBytes:number;warning:string|null}|null>;
   "tasks.cancel": Route<{kind:import("./core/task-overview.js").TaskKind},{cancelled:number}>;
   "app.version": Route<Empty,{version:string;packaged:boolean}>;
   "files.drag": Route<{fileIds:string[]},{started:true;count:number}>;
