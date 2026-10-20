@@ -126,7 +126,8 @@ export class ImageFinderService {
   private async cachedThumbnail(
     fileId: string,
   ): Promise<{ path: string } | null> {
-    const file = this.catalog.getFile(fileId);
+    const file = this.catalog.db.prepare("SELECT thumbnail_key thumbnailKey FROM files_visible WHERE id=?").get(fileId) as {thumbnailKey: string | null} | undefined;
+    if (!file) throw new Error("FILE_NOT_FOUND");
     if (!file.thumbnailKey || !/^[a-f0-9]{64}\.webp$/.test(file.thumbnailKey))
       return null;
     const cached = path.join(this.catalog.cacheDirectory, file.thumbnailKey);

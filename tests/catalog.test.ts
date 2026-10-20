@@ -627,3 +627,19 @@ test("organization collection add/remove undo retains prior membership and rejec
     c.close();
   }
 });
+
+
+test("lean totals equal returned matches for projected metadata, compound filters, sorts and stacking", async () => {
+ const {c,root}=await fixture();
+ try {
+  c.applyArtwork(artwork());const tag=(c.tags()[0] as any).id;
+  c.db.prepare("INSERT INTO features VALUES('a',?,0.8,0.9,'warm','fixture'),('b',?,0.2,0.1,'cool','fixture')").run('[{"hex":"#ff0000","weight":1}]','[{"hex":"#0000ff","weight":1}]');
+  const smart=c.createCollection("published warm","smart",{publishedAfter:"2019",tone:{warmth:"warm"}});
+  const filters:import("../src/contracts.js").Filter[]=[{}, {missing:false},{rootIds:[root.id]},{creatorIds:["123"]},{publishedAfter:"2019",publishedBefore:"2021"},{text:"画师"},{text:"测试"},{text:"初音"},{tags:[{ids:[tag],mode:"all"}]},{excludeTagIds:[tag]},{tone:{warmth:"warm"}},{tone:{brightnessMin:0.5,saturationMax:1}},{color:{hex:"#ff0000",tolerance:10}},{color:{hex:"#ff0000",includeUnanalyzed:true,tolerance:10}},{color:{hex:"#ff0000",restrict:false}},{collectionId:smart},{creatorIds:["123"],tone:{warmth:"cool"},heightMin:1000},{directory:{rootId:root.id,relativePath:""},formats:["jpeg"],orientation:"portrait"},{favorite:false,ratingMin:0,bytesMax:20,addedAfter:1},{artworkIds:["81470181"],pixelsMin:100,aspect:2/3}];
+  for(const filter of filters)for(const sort of ["added_desc","name","rating_desc","pixels_desc","color"] as const)for(const stackArtworks of [false,true]) {
+   const page=c.query({filter,sort,stackArtworks,limit:500});assert.equal(page.total,page.items.length,JSON.stringify({filter,sort,stackArtworks}));
+   const first=c.query({filter,sort,stackArtworks,limit:1});assert.equal(first.total,page.total);assert.deepEqual(first.items,page.items.slice(0,1));
+  }
+  const ranked=c.rankedQuery({filter:{creatorIds:["123"]},limit:500},new Map([["a",0.7],["c",0.9]]));assert.equal(ranked.total,ranked.items.length);assert.deepEqual(ranked.items.map(i=>i.id),["a"]);
+ }finally{c.close();}
+});

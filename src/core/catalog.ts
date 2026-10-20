@@ -418,6 +418,7 @@ export class Catalog {
     };
     expand(req.filter ?? {});
     const where: string[] = [];
+    let countArtwork = false, countCreator = false, countFeatures = false;
     if (this.aiScores) where.push("ai_similarity(f.id) IS NOT NULL");
     const args: any[] = [];
     const add = (sql: string, ...values: any[]) => {
@@ -445,6 +446,7 @@ export class Catalog {
       );
       list("f.artwork_id", filter.artworkIds);
       list("a.creator_id", filter.creatorIds);
+      if (filter.creatorIds?.length || filter.publishedAfter !== undefined || filter.publishedBefore !== undefined) countArtwork = true;
       if (filter.favorite !== undefined) add("f.favorite=?", +filter.favorite);
       if (filter.missing !== undefined) add("f.missing=?", +filter.missing);
       for (const [key, col, op] of [
@@ -474,6 +476,7 @@ export class Catalog {
           filter.aspectTolerance ?? 0.03,
         );
       if (filter.text) {
+        countArtwork = countCreator = true;
         const t = "%" + normalize(filter.text).replace(/[\\%_]/g, "\\$&") + "%";
         const tagFiles = this.textTagFileIds(t);
         add(
@@ -510,6 +513,7 @@ export class Catalog {
           ...filter.enrichmentStatus,
         );
       if (filter.tone) {
+        countFeatures = true;
         const t = filter.tone;
         if (t.warmth) add("z.warmth=?", t.warmth);
         for (const [key, col, op] of [
@@ -541,6 +545,7 @@ export class Catalog {
     let order = this.aiScores
       ? "ai_similarity(f.id) DESC,f.id"
       : sorts[req.sort ?? "added_desc"];
+    const countWhere = [...where];
     let distanceOrder = "NULL";
     for (const filter of filters) {
       if (filter.color) {
@@ -549,10 +554,13 @@ export class Catalog {
           throw new Error("INVALID_COLOR");
         const colorExpr = `palette_distance(z.palette_json, '${color.hex}', ${clamp(color.minWeight, 0, 1, 0.08)})`;
         const condition = `(${colorExpr}<=${clamp(color.tolerance, 0, 200, 35)}${color.includeUnanalyzed ? " OR z.file_id IS NULL" : ""})`;
-        if (color.restrict !== false)
+        if (color.restrict !== false) {
+          countFeatures = true;
+          countWhere.push(condition);
           queryBase += queryBase.includes(" WHERE ")
             ? " AND " + condition
             : " WHERE " + condition;
+        }
         if (req.sort === "color" && !this.aiScores) {
           distanceOrder = colorExpr;
           order = colorExpr + " ASC NULLS LAST,f.id";
@@ -596,11 +604,13 @@ export class Catalog {
         limit,
       };
     }
-    const total = (
-      this.db
-        .prepare("SELECT COUNT(*) n FROM (" + queryBase + ")")
-        .get(...args) as any
-    ).n;
+    // Count only filter dependencies; projected metadata is needed for the page, not every matching file.
+    const countFrom = " FROM files_visible f"
+      + (countArtwork ? " LEFT JOIN artworks a ON a.id=f.artwork_id" : "")
+      + (countCreator ? " LEFT JOIN creators c ON c.id=a.creator_id" : "")
+      + (countFeatures ? " LEFT JOIN features z ON z.file_id=f.id" : "");
+    const total = (this.db.prepare("SELECT COUNT(*) n" + countFrom
+      + (countWhere.length ? " WHERE " + countWhere.join(" AND ") : "")).get(...args) as any).n;
     return {
       items: this.db
         .prepare(queryBase + " ORDER BY " + order + " LIMIT ? OFFSET ?")
@@ -649,7 +659,7 @@ export class Catalog {
   tags(search = "", offset = 0, limit = 100, category?: TagCategory) {
     return this.db
       .prepare(
-        `WITH effective AS (SELECT f.id file_id,at.tag_id FROM files_visible f JOIN artwork_tags at ON at.artwork_id=f.artwork_id UNION SELECT file_id,tag_id FROM file_tag_overrides WHERE action='add' UNION SELECT file_id,tag_id FROM ai_reviews WHERE action='accept' AND tag_id IS NOT NULL UNION SELECT file_id,tag_id FROM danbooru_tags UNION SELECT file_id,tag_id FROM ai_auto_effective), counts AS (SELECT e.tag_id,COUNT(DISTINCT e.file_id) n FROM effective e JOIN files_visible visible ON visible.id=e.file_id LEFT JOIN file_tag_overrides o ON o.file_id=e.file_id AND o.tag_id=e.tag_id AND o.action='exclude' WHERE o.file_id IS NULL GROUP BY e.tag_id) SELECT t.*,(SELECT json_group_array(alias) FROM tag_aliases al WHERE al.tag_id=t.id) aliasesJson,COALESCE(counts.n,0) usageCount FROM tags t LEFT JOIN counts ON counts.tag_id=t.id WHERE (? IS NULL OR t.category=?) AND EXISTS(SELECT 1 FROM tag_aliases al WHERE al.tag_id=t.id AND instr(al.alias_key,?)>0) ORDER BY t.name,t.id LIMIT ? OFFSET ?`,
+        `WITH page AS MATERIALIZED(SELECT t.* FROM tags t WHERE (? IS NULL OR t.category=?) AND t.id IN (SELECT al.tag_id FROM tag_aliases al WHERE instr(al.alias_key,?)>0) ORDER BY t.name,t.id LIMIT ? OFFSET ?), effective AS (SELECT f.id file_id,at.tag_id FROM page p CROSS JOIN artwork_tags at ON at.tag_id=p.id CROSS JOIN files_visible f ON f.artwork_id=at.artwork_id UNION SELECT o.file_id,o.tag_id FROM page p JOIN file_tag_overrides o ON o.tag_id=p.id WHERE o.action='add' UNION SELECT r.file_id,r.tag_id FROM page p JOIN ai_reviews r ON r.tag_id=p.id WHERE r.action='accept' UNION SELECT d.file_id,d.tag_id FROM page p JOIN danbooru_tags d ON d.tag_id=p.id UNION SELECT a.file_id,a.tag_id FROM page p CROSS JOIN ai_auto_effective a ON a.tag_id=p.id), counts AS (SELECT e.tag_id,COUNT(DISTINCT e.file_id) n FROM effective e CROSS JOIN files_visible visible ON visible.id=e.file_id LEFT JOIN file_tag_overrides o ON o.file_id=e.file_id AND o.tag_id=e.tag_id AND o.action='exclude' WHERE o.file_id IS NULL GROUP BY e.tag_id) SELECT t.*,(SELECT json_group_array(alias) FROM tag_aliases al WHERE al.tag_id=t.id) aliasesJson,COALESCE(counts.n,0) usageCount FROM page t LEFT JOIN counts ON counts.tag_id=t.id ORDER BY t.name,t.id`,
       )
       .all(
         category ?? null,

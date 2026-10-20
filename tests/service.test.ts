@@ -301,7 +301,9 @@ test("concurrent thumbnail requests decode once and cached hits do not interrupt
     );
     assert.equal(calls, 1);
     assert.ok(previews.every((x) => x.path === previews[0].path));
-    await s.invoke("images.resolve", { fileId: file.id, variant: "thumbnail" });
+    const getFile=s.catalog.getFile.bind(s.catalog);
+    s.catalog.getFile=()=>{throw new Error("cached thumbnail must not load full metadata");};
+    try { await s.invoke("images.resolve", { fileId: file.id, variant: "thumbnail" }); } finally { s.catalog.getFile=getFile; }
     assert.equal(calls, 1);
   } finally {
     await s.close();

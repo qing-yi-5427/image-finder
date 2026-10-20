@@ -372,3 +372,26 @@ test("automatic coverage counts files once and preserves effective, excluded and
   f.c.db.prepare("UPDATE ai_inputs SET bytes=99 WHERE file_id='c' AND kind='wd'").run();check(0);
  }finally{await f.close();}
 });
+
+
+test("paged tag counts equal the previous global aggregation across every source and exclusion", async () => {
+ const f=await fixture();
+ try {
+  for(const id of ["a","b","c"]){f.seed(id);for(const tag of ["shared","auto_only"])
+   f.c.db.prepare("INSERT INTO ai_candidates VALUES(?,?,'content',0.9)").run(id,tag);}
+  f.c.enableAutomaticTags({rootId:f.root.id,relativePath:"",recursive:true});
+  const shared=(f.c.tags("shared")[0] as any).id;
+  const manual=f.c.createTag("Manual alias","style",["Other manual"]);f.c.overrideTags(["a","b"],[manual],"add");f.c.overrideTags(["a"],[shared],"exclude");
+  f.c.db.prepare("INSERT INTO ai_reviews VALUES('a','shared','accept',?,1)").run(shared);
+  f.c.db.prepare("INSERT INTO danbooru_tags VALUES('b','raw-shared',?,'content',1)").run(shared);
+  f.c.db.prepare("UPDATE files SET artwork_id='99999999' WHERE id IN ('a','b')").run();
+  f.c.applyArtwork({id:"99999999",title:"Fixture",creator:{id:"1",name:"Fixture"},pageCount:2,publishedAt:null,tags:[{name:"shared"}],raw:{}});
+  f.c.createTag("Unused","style");
+  const old=`WITH effective AS (SELECT f.id file_id,at.tag_id FROM files_visible f JOIN artwork_tags at ON at.artwork_id=f.artwork_id UNION SELECT file_id,tag_id FROM file_tag_overrides WHERE action='add' UNION SELECT file_id,tag_id FROM ai_reviews WHERE action='accept' AND tag_id IS NOT NULL UNION SELECT file_id,tag_id FROM danbooru_tags UNION SELECT file_id,tag_id FROM ai_auto_effective), counts AS (SELECT e.tag_id,COUNT(DISTINCT e.file_id) n FROM effective e JOIN files_visible visible ON visible.id=e.file_id LEFT JOIN file_tag_overrides o ON o.file_id=e.file_id AND o.tag_id=e.tag_id AND o.action='exclude' WHERE o.file_id IS NULL GROUP BY e.tag_id) SELECT t.*,(SELECT json_group_array(alias) FROM tag_aliases al WHERE al.tag_id=t.id) aliasesJson,COALESCE(counts.n,0) usageCount FROM tags t LEFT JOIN counts ON counts.tag_id=t.id WHERE (? IS NULL OR t.category=?) AND EXISTS(SELECT 1 FROM tag_aliases al WHERE al.tag_id=t.id AND instr(al.alias_key,?)>0) ORDER BY t.name,t.id LIMIT ? OFFSET ?`;
+  const check=()=>{for(const search of ["","shared","manual","other","unused","not found"])for(const category of [undefined,"style","content"] as const)for(const offset of [0,1,3]){
+   const before=f.c.db.prepare(old).all(category??null,category??null,search,2,offset).map((r:any)=>{const {aliasesJson,...rest}=r;return {...rest,aliases:JSON.parse(aliasesJson)};});
+   assert.deepEqual(f.c.tags(search,offset,2,category),before);
+  }};
+  check();f.c.db.prepare("UPDATE files SET relative_path='.hidden/c.png' WHERE id='c'").run();check();
+ }finally{await f.close();}
+});
