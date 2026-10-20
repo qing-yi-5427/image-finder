@@ -28,6 +28,7 @@ import type {
   AiConfig,
   AiKind,
   AiStatus,
+  AiProgress,
   AiCandidates,
   AiMethodMap,
 } from "./ai-contracts.js";
@@ -382,6 +383,38 @@ export class LocalAi {
       filesMissing,
     };
   }
+  progress(): AiProgress {
+    const db = this.catalog.db;
+    return { queues: kinds.map((kind) => {
+        const counts = { waiting: 0, running: 0, done: 0, failed: 0, cancelled:0 };
+        for (const row of db
+          .prepare(
+            "SELECT status,COUNT(*) n FROM ai_jobs WHERE kind=? GROUP BY status",
+          )
+          .all(kind) as any[])
+          if (row.status in counts)
+            counts[row.status as keyof typeof counts] = row.n;
+        return {
+          kind,
+          paused: !!(
+            db
+              .prepare("SELECT paused FROM ai_state WHERE kind=?")
+              .get(kind) as any
+          ).paused,
+          activeFileId: this.active.get(kind) ?? null,
+          blockingError: this.blockingErrors.get(kind) ?? null,
+          counts,
+          lastError:
+            (
+              db
+                .prepare(
+                  "SELECT last_error FROM ai_jobs WHERE kind=? AND status='failed' ORDER BY updated_at DESC LIMIT 1",
+                )
+                .get(kind) as any
+            )?.last_error ?? null,
+        };
+      }) };
+  }
   status(): AiStatus {
     const db = this.catalog.db;
     const total = (
@@ -398,43 +431,15 @@ export class LocalAi {
       python: this.python,
       config: this.config(),
       models: kinds.map((kind) => this.modelStatus(kind)),
-      queues: kinds.map((kind) => {
-        const counts = { waiting: 0, running: 0, done: 0, failed: 0, cancelled:0 };
-        for (const row of db
-          .prepare(
-            "SELECT status,COUNT(*) n FROM ai_jobs WHERE kind=? GROUP BY status",
-          )
-          .all(kind) as any[])
-          if (row.status in counts)
-            counts[row.status as keyof typeof counts] = row.n;
+      queues: this.progress().queues.map((state) => {
+        const kind = state.kind;
         const runs = db
           .prepare(
             "SELECT COUNT(*) total,COALESCE(SUM(CASE WHEN i.bytes=f.bytes AND i.mtime_ms=f.mtime_ms THEN 1 ELSE 0 END),0) indexed_count FROM ai_runs r JOIN files_visible f ON f.id=r.file_id LEFT JOIN ai_inputs i ON i.file_id=r.file_id AND i.kind=r.kind WHERE r.kind=? AND r.model_version=? AND f.missing=0",
           )
           .get(kind, AI_MODELS[kind].version) as any;
         const indexed = runs.indexed_count;
-        return {
-          kind,
-          paused: !!(
-            db
-              .prepare("SELECT paused FROM ai_state WHERE kind=?")
-              .get(kind) as any
-          ).paused,
-          activeFileId: this.active.get(kind) ?? null,
-          blockingError: this.blockingErrors.get(kind) ?? null,
-          counts,
-          indexed,
-          stale: runs.total - indexed,
-          lastError:
-            (
-              db
-                .prepare(
-                  "SELECT last_error FROM ai_jobs WHERE kind=? AND status='failed' ORDER BY updated_at DESC LIMIT 1",
-                )
-                .get(kind) as any
-            )?.last_error ?? null,
-          total,
-        };
+        return { ...state, indexed, stale: runs.total - indexed, total };
       }),
       install: { ...this.installState, stage },
       maintenance:this.maintenance,
@@ -622,6 +627,8 @@ export class LocalAi {
       this.active.delete(kind);
       this.activeWork.delete(kind);
       this.work.delete(work);
+      // Chain one job per kind after completion; the timer remains a startup/recovery fallback.
+      setImmediate(() => this.schedule()).unref();
     });
     this.activeWork.set(kind, work);
     this.work.add(work);

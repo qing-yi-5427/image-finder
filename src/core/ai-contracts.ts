@@ -31,6 +31,7 @@ export interface AiStatus {
   }>;
   install: { running: boolean; stage: string; error: string | null };
 }
+export type AiProgress = { queues: Array<Pick<AiStatus["queues"][number], "kind" | "paused" | "activeFileId" | "blockingError" | "counts" | "lastError">> };
 export interface AiCandidate {
   tag: string;
   displayName: string;
@@ -64,6 +65,7 @@ export interface AiMethodMap {
     };
   };
   "ai.status": { request: Record<string, never>; result: AiStatus };
+  "ai.progress": { request: Record<string, never>; result: AiProgress };
   "ai.configure": { request: Partial<AiConfig>; result: AiStatus };
   "ai.install": { request: Record<string, never>; result: AiStatus };
   "ai.enqueue": {

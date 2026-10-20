@@ -267,7 +267,7 @@ void app.whenReady().then(async () => {
       const directory = join(await realpath(selected.filePaths[0]), ".image-finder-cache");
       return cacheGate.change(() => host.invoke("cache.configure", { directory }));
     }
-    if (aiCleaning && method.startsWith("ai.") && !["ai.status", "ai.environment"].includes(method))
+    if (aiCleaning && method.startsWith("ai.") && !["ai.status", "ai.progress", "ai.environment"].includes(method))
       throw new Error("AI 环境正在维护，请稍后重试");
     if (aiCleaning && ["library.add", "library.relocate"].includes(method))
       throw new Error("AI 环境正在维护，请稍后调整图库目录");
@@ -401,7 +401,7 @@ void app.whenReady().then(async () => {
   });
   mainWindow = window;
   const traySnapshot = async ():Promise<TrayTaskSnapshot> => {
-    const [stats,pixiv,ai,sauce,danbooru] = await Promise.all([host.invoke("system.stats"),host.invoke("jobs.list",{limit:1}),host.invoke("ai.status"),host.invoke("sauce.status"),host.invoke("danbooru.status")]);
+    const [stats,pixiv,ai,sauce,danbooru] = await Promise.all([host.invoke("system.stats"),host.invoke("jobs.list",{limit:1}),host.invoke("ai.progress"),host.invoke("sauce.status"),host.invoke("danbooru.status")]);
     return {stats,pixiv,ai,sauce,danbooru};
   };
   appTray.configure({
@@ -429,7 +429,7 @@ void app.whenReady().then(async () => {
       .then(async (status) => {
         const [pixiv, ai, sauce, danbooru] = await Promise.all([
           host.invoke("jobs.list", { limit: 1 }),
-          host.invoke("ai.status"),
+          host.invoke("ai.progress"),
           host.invoke("sauce.status"),
           host.invoke("danbooru.status"),
         ]);

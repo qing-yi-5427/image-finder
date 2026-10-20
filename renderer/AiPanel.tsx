@@ -19,6 +19,7 @@ export function AiTasksPanel({ notify, onlyKind }: { notify: Notify; onlyKind?: 
   const [busy, setBusy] = useState(false);
   const [general, setGeneral] = useState("0.55");
   const [character, setCharacter] = useState("0.85");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const load = async () => {
     const result = await api.invoke("ai.status", {});
     setStatus(result);
@@ -71,7 +72,7 @@ export function AiTasksPanel({ notify, onlyKind }: { notify: Notify; onlyKind?: 
           </div>
         </article>;
       })}
-      {onlyKind !== "semantic" && <details className="if-ai-settings"><summary>模型安装与分析设置</summary><AiEnvironmentSettings notify={notify} /></details>}
+      {onlyKind !== "semantic" && <details className="if-ai-settings" open={settingsOpen} onToggle={event => { if (event.target === event.currentTarget) setSettingsOpen(event.currentTarget.open); }}><summary>模型安装与分析设置</summary>{settingsOpen && <AiEnvironmentSettings notify={notify} />}</details>}
     </>}
   </section>;
 }

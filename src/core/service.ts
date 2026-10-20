@@ -191,7 +191,7 @@ export class ImageFinderService {
           this.queue.runScope(),
           {
             pixiv: this.queue.sourceState(),
-            ai: this.ai.status(),
+            ai: this.ai.progress(),
             danbooru: this.danbooru.status(),
             sauce: this.sauce.status(),
             local: this.local.status(),
@@ -267,6 +267,8 @@ export class ImageFinderService {
         return p.semantic ? this.ai.search(p) : c.query(p);
       case "ai.status":
         return this.ai.status();
+      case "ai.progress":
+        return this.ai.progress();
       case "ai.configure":
         return this.ai.configure(p);
       case "ai.install":

@@ -391,3 +391,45 @@ test("waiting queue order uses its covering index without a temporary sort", asy
   assert.equal((f.catalog.db.prepare(query).get("wd") as any).file_id,"a");
  } finally { await f.ai.close();f.catalog.close(); }
 });
+
+
+test("light progress equals full status queue state without indexing coverage queries", async () => {
+ const f=await fixture();try {
+  f.ai.enqueue({kind:"wd",fileIds:["a","b"]});f.ai.enqueue({kind:"semantic",fileIds:["c"]});
+  const full=f.ai.status();const prepare=f.catalog.db.prepare.bind(f.catalog.db);
+  f.catalog.db.prepare=((sql:string)=>{assert.ok(!sql.includes("ai_runs")&&!sql.includes("files_visible"),"progress must not scan coverage");return prepare(sql);}) as any;
+  const light=f.ai.progress();f.catalog.db.prepare=prepare;
+  assert.deepEqual(light.queues,full.queues.map(({indexed,stale,total,...queue})=>queue));
+  assert.ok(!(light as any).models);assert.ok(!(light as any).config);
+ }finally{await f.ai.close();f.catalog.close();}
+});
+
+test("completed jobs chain without the fallback poll and a pause stops the chain", async () => {
+ const f=await fixture();clearInterval((f.ai as any).timer);
+ try {
+  f.ai.enqueue({kind:"wd",fileIds:["a","b","c","d"]});f.ai.resume("wd");
+  assert.equal((await done(f.ai,"wd")).counts.done,4);
+  let release!:()=>void;let calls=0;
+  f.fake.run=async()=>{calls++;await new Promise<void>(resolve=>release=resolve);return {elapsedMs:1,providers:["fixture"],candidates:[]};};
+  f.ai.enqueue({kind:"wd",fileIds:["a","b"],scope:"all"});
+  (f.ai as any).schedule();
+  for(let i=0;i<100&&!release;i++)await new Promise(r=>setTimeout(r,5));
+  f.ai.pause("wd");release();await (f.ai as any).activeWork.get("wd");await new Promise(r=>setImmediate(r));
+  assert.equal(calls,1);assert.equal(f.ai.progress().queues[0].counts.waiting,1);
+ }finally{await f.ai.close();f.catalog.close();}
+});
+
+
+test("cancellation and close prevent completion chaining from starting another queued file", async () => {
+ for(const mode of ["cancel","close"] as const){
+  const f=await fixture();clearInterval((f.ai as any).timer);let release!:()=>void,calls=0;
+  f.fake.run=async()=>{calls++;await new Promise<void>(resolve=>release=resolve);return {elapsedMs:1,providers:["fixture"],candidates:[]};};
+  try {
+   f.ai.enqueue({kind:"wd",fileIds:["a","b"]});f.ai.resume("wd");
+   for(let i=0;i<100&&!release;i++)await new Promise(r=>setTimeout(r,5));
+   assert.ok(release);const ending=mode==="cancel"?f.ai.cancel("wd"):f.ai.close();release();await ending;await new Promise(r=>setImmediate(r));
+   assert.equal(calls,1);assert.equal((f.catalog.db.prepare("SELECT COUNT(*) n FROM ai_runs").get() as any).n,0);
+   const q=f.ai.progress().queues[0];assert.equal(q.counts.done,0);assert.equal(mode==="cancel"?q.counts.cancelled:q.counts.waiting,mode==="cancel"?2:1);
+  }finally{release?.();await f.ai.close();f.catalog.close();}
+ }
+});

@@ -396,7 +396,7 @@ for (const m of ["local.retry", "images.retry"]) route(m, { fileIds: ids }, []);
 route("settings.update", { cacheLimitBytes: integer });
 route("system.restore", { source: str });
 const aiKind = one(["wd", "semantic"]);
-for (const name of ["ai.status", "ai.install"]) route(name);
+for (const name of ["ai.status", "ai.progress", "ai.install"]) route(name);
 route(
   "ai.configure",
   {

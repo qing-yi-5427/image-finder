@@ -17,7 +17,8 @@ const reasonLabel = (reason: string) => {
   return reason;
 };
 const pct = (n: number, total: number) => total ? `${Math.min(100, n / total * 100).toFixed(1)}%` : "0%";
-export function TaskOverview({ controls, notify }: { controls: Record<string, ReactNode>; notify: (message: string, undo?: () => void, kind?: "success" | "error") => void }) {
+export function TaskOverview({ controls, notify, onDetailsChange, refreshKey = 0 }: { controls: Record<string, ReactNode>; notify: (message: string, undo?: () => void, kind?: "success" | "error") => void; onDetailsChange?: (kind: string, open: boolean) => void; refreshKey?: number }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [overview, setOverview] = useState<Overview | null>(null);
   const [scope, setScope] = useState<Scope | null | undefined>(undefined);
   const [roots, setRoots] = useState<LibraryRoot[]>([]);
@@ -70,7 +71,7 @@ export function TaskOverview({ controls, notify }: { controls: Record<string, Re
     };
     setOverview(null); void load(); const timer = setInterval(() => void load(), 4000);
     return () => { alive = false; clearInterval(timer); };
-  }, [scope]);
+  }, [scope, refreshKey]);
   const viewed = scope === undefined ? overview?.scope : scope;
   const differs = !!overview && (overview.scope.rootId !== (overview.executionScope?.rootId ?? null) || overview.scope.relativePath !== (overview.executionScope?.relativePath ?? "") || (overview.scope.rootId !== null && overview.scope.recursive !== overview.executionScope?.recursive));
   return <>
@@ -98,7 +99,7 @@ export function TaskOverview({ controls, notify }: { controls: Record<string, Re
         {card.lastError && card.lastError !== card.reason && <details className="if-ai-summary if-ai-failure"><summary>最近失败（已跳过）</summary><p>{card.lastError}</p><p>该图片已计入失败，队列会跳过它处理其他图片；可在任务详情中重试失败。</p></details>}
         {card.kind === "sauce" && card.paused && <label className="if-queue-note if-task-sauce-consent"><input type="checkbox" checked={sauceConsent} onChange={e => setSauceConsent(e.target.checked)} />我同意继续后向 SauceNAO 上传原队列图片的压缩预览图。</label>}
         <div className="if-task-primary-action"><Button disabled={!!busyKind || (card.kind === "sauce" && card.paused && !sauceConsent)} onClick={() => void action(card)}>{busyKind === card.kind ? "处理中…" : card.kind === "pixiv" && card.reason === "batch_rest" ? "暂停自动继续" : card.paused ? card.kind === "local" ? "继续图片处理" : "继续原队列" : card.kind === "local" ? "暂停图片处理" : "暂停原队列"}</Button><Button disabled={!!busyKind || card.cancellable === 0} aria-label={`取消 ${card.label} 当前任务`} onClick={() => setCancelTarget(card)}>取消当前任务（{card.cancellable}）</Button><span className="if-queue-note">操作处理原队列，查看范围不限制执行。</span></div>
-        <details className="if-task-owned-details"><summary>{{pixiv:"Pixiv",wd:"WD",semantic:"中文语义",danbooru:"Danbooru",sauce:"SauceNAO",local:"本地处理"}[card.kind]}任务详情 · 全队列</summary><p className="if-queue-note">以下为全队列操作与完整状态，继续会处理原队列，查看范围不会限制执行。</p>{controls[card.kind]}</details>
+        <details className="if-task-owned-details" open={!!expanded[card.kind]} onToggle={event => { if (event.target !== event.currentTarget) return; const open = event.currentTarget.open; setExpanded(previous => previous[card.kind] === open ? previous : { ...previous, [card.kind]: open }); onDetailsChange?.(card.kind, open); }}><summary>{{pixiv:"Pixiv",wd:"WD",semantic:"中文语义",danbooru:"Danbooru",sauce:"SauceNAO",local:"本地处理"}[card.kind]}任务详情 · 全队列</summary><p className="if-queue-note">以下为全队列操作与完整状态，继续会处理原队列，查看范围不会限制执行。</p>{expanded[card.kind] && controls[card.kind]}</details>
       </div>
     </article>)}</section>
     {cancelTarget && <Modal title={`取消 ${cancelTarget.label} 当前任务？`} onClose={() => { if (!busyKind) setCancelTarget(null); }} footer={<><Button disabled={!!busyKind} onClick={() => setCancelTarget(null)}>保留任务</Button><Button variant="danger" disabled={!!busyKind} onClick={() => void cancelTasks()}>{busyKind ? "正在取消…" : "确认取消全队列任务"}</Button></>}>

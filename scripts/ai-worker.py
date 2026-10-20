@@ -10,6 +10,22 @@ KIND = sys.argv[2]
 PROVIDER = sys.argv[3] if len(sys.argv)>3 else 'cpu'
 sessions = {}
 profiled=set()
+wd_tag_rows=None
+text_tokenizer=None
+
+def wd_tags():
+    global wd_tag_rows
+    if wd_tag_rows is None:
+        with open(HOME/'models'/'wd'/'selected_tags.csv',encoding='utf-8') as stream:
+            wd_tag_rows=[(tag['name'],'character' if tag['category']=='4' else 'rating' if tag['category']=='9' else 'content') for tag in csv.DictReader(stream)]
+    return wd_tag_rows
+
+def tokenizer():
+    global text_tokenizer
+    if text_tokenizer is None:
+        from transformers import BertTokenizer
+        text_tokenizer=BertTokenizer(vocab_file=str(HOME/'models'/'semantic'/'vocab.txt'),do_lower_case=True)
+    return text_tokenizer
 def execution(sess,name):
     if PROVIDER!='directml' or name in profiled:return None
     profiled.add(name)
@@ -60,7 +76,11 @@ class InputImageError(Exception): pass
 def image(path):
     try:
         with Image.open(path) as source:
-            source=ImageOps.exif_transpose(source).convert('RGBA')
+            source=ImageOps.exif_transpose(source)
+            # Opaque RGB pixels are already identical to white alpha compositing.
+            if source.mode=='RGB' and 'transparency' not in source.info:
+                return source.convert('RGB')
+            source=source.convert('RGBA')
             canvas=Image.new('RGBA',source.size,'white')
             canvas.alpha_composite(source)
             return canvas.convert('RGB')
@@ -82,17 +102,14 @@ def infer(request):
         padded.paste(original,((edge-original.width)//2,(edge-original.height)//2))
         pixels=np.asarray(padded.resize((size,size),Image.Resampling.BICUBIC),dtype=np.float32)[:,:,::-1][None,...]
         scores=sess.run(None,{sess.get_inputs()[0].name:pixels})[0][0]
-        with open(HOME/'models'/'wd'/'selected_tags.csv',encoding='utf-8') as stream:
-            tags=list(csv.DictReader(stream))
+        tags=wd_tags()
         # Persist broad raw candidate range; display threshold is recorded separately.
         retained=set(request.get('retainTags',[]))
-        candidates=[{'tag':tag['name'],'category':'character' if tag['category']=='4' else 'rating' if tag['category']=='9' else 'content','score':float(score)} for tag,score in zip(tags,scores) if float(score)>=0.01 or tag['name'] in retained]
+        candidates=[{'tag':name,'category':category,'score':float(score)} for (name,category),score in zip(tags,scores) if float(score)>=0.01 or name in retained]
         candidates.sort(key=lambda item:item['score'],reverse=True)
         result={'candidates':candidates,'providers':sess.get_providers(),'execution':execution(sess,'wd')}
     elif 'text' in request:
-        from transformers import BertTokenizer
-        tokenizer=BertTokenizer(vocab_file=str(HOME/'models'/'semantic'/'vocab.txt'),do_lower_case=True)
-        tokens=tokenizer(request['text'],padding='max_length',max_length=52,truncation=True,return_tensors='np')
+        tokens=tokenizer()(request['text'],padding='max_length',max_length=52,truncation=True,return_tensors='np')
         sess=session('text','text.onnx')
         output=sess.run(None,{i.name:tokens[i.name].astype(np.int64) for i in sess.get_inputs()})[0]
         result={'vector':normalize(output),'providers':sess.get_providers(),'execution':execution(sess,'text')}

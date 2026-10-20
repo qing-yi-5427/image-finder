@@ -65,6 +65,8 @@ function sourceReason(reason: string) {
 }
 
 export function TasksPage({ notify }: { notify: Notify }) {
+  const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
   const [local, setLocal] = useState<LocalTaskStatus | null>(null),
     [jobs, setJobs] = useState<MethodMap["jobs.list"]["result"] | null>(null),
     [network, setNetwork] = useState<NetworkStatus | null>(null),
@@ -76,7 +78,7 @@ export function TasksPage({ notify }: { notify: Notify }) {
     [jobsError, setJobsError] = useState(""),
     [jobsLoading, setJobsLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { if (!detailsOpen.pixiv) return; setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [detailsOpen.pixiv]);
   const resting = jobs?.source.reason === "batch_rest";
   const userPaused = !!jobs?.source.paused && !resting;
   const queueLabel = resting ? "批次休息中" : jobs?.source.paused ? "已暂停" : jobs && jobs.source.pause_until > now ? "间隔等待中" : "队列可运行";
@@ -89,15 +91,15 @@ export function TasksPage({ notify }: { notify: Notify }) {
     const token = ++request.current;
     try {
     const [l, j, n] = await Promise.all([
-      api.invoke("local.status", {}),
-      api.invoke("jobs.list", { offset, limit: 30, ...(jobStatus ? { statuses: [jobStatus] } : {}), ...(search ? { artworkId: search } : {}) }),
-      api.invoke("network.status", {}),
+      detailsOpen.local ? api.invoke("local.status", {}) : Promise.resolve(null),
+      detailsOpen.pixiv ? api.invoke("jobs.list", { offset, limit: 30, ...(jobStatus ? { statuses: [jobStatus] } : {}), ...(search ? { artworkId: search } : {}) }) : Promise.resolve(null),
+      detailsOpen.pixiv ? api.invoke("network.status", {}) : Promise.resolve(null),
     ]);
     if (!mounted.current || request.current !== token) return;
-    if (offset > 0 && offset >= j.total) { setOffset(Math.max(0, Math.ceil(j.total / 30) - 1) * 30); return; }
-    setLocal(l);
-    setJobs(j);
-    setNetwork(n);
+    if (j && offset > 0 && offset >= j.total) { setOffset(Math.max(0, Math.ceil(j.total / 30) - 1) * 30); return; }
+    if (l) setLocal(l);
+    if (j) setJobs(j);
+    if (n) setNetwork(n);
     setJobsError("");
     } catch (failure) {
       if (mounted.current && request.current === token) setJobsError(error(failure));
@@ -106,6 +108,7 @@ export function TasksPage({ notify }: { notify: Notify }) {
     }
   };
   useEffect(() => {
+    if (!detailsOpen.pixiv && !detailsOpen.local) return;
     let alive = true;
     setJobsLoading(true);
     const load = () =>
@@ -123,7 +126,7 @@ export function TasksPage({ notify }: { notify: Notify }) {
       clearInterval(timer);
       off();
     };
-  }, [offset, jobStatus, search]);
+  }, [offset, jobStatus, search, detailsOpen.pixiv, detailsOpen.local]);
   const act = (action: () => Promise<unknown>) =>
     run(async () => {
       await action();
@@ -136,11 +139,11 @@ export function TasksPage({ notify }: { notify: Notify }) {
           <h1 className="if-page-title">后台任务</h1>
           <p className="if-subtitle">本地处理与来源补全的实际状态。</p>
         </div>
-        <Button disabled={busy} onClick={() => act(refresh)}>
+        <Button disabled={busy} onClick={() => { setRefreshKey(key => key + 1); act(refresh); }}>
           刷新
         </Button>
       </header>
-      <TaskOverview notify={notify} controls={{
+      <TaskOverview notify={notify} refreshKey={refreshKey} onDetailsChange={(kind, open) => setDetailsOpen(previous => previous[kind] === open ? previous : { ...previous, [kind]: open })} controls={{
         pixiv: <>{jobsError && <p role="alert" className="if-task-load-error">{jobsError}</p>}        <article className="if-task-group">
           <div className="if-task-heading">
             <div className="if-task-icon">
