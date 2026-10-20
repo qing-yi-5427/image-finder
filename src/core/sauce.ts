@@ -242,6 +242,7 @@ export class SauceQueue {
     })();
     return { added };
   }
+  enqueueFile(fileId:string){const file=this.c.getFile(fileId);if(file.missing||file.artworkId)return {added:0};return {added:this.c.db.prepare("INSERT OR IGNORE INTO sauce_jobs(file_id,status,updated_at) VALUES(?,'waiting',?)").run(fileId,Date.now()).changes};}
   pause(reason = "user") {
     this.c.db
       .prepare(

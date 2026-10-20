@@ -269,7 +269,7 @@ export class ImageProcessor {
   ): Promise<{ processed: number; failed: number }> {
     const pending = this.catalog.db
       .prepare(
-        `SELECT f.id FROM files_visible f JOIN roots r ON r.id=f.root_id WHERE f.missing=0 AND f.processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM local_cancelled_images x WHERE x.file_id=f.id AND x.bytes=f.bytes AND x.mtime_ms=f.mtime_ms) AND f.mtime_ms<=? AND r.status<>'offline' AND ((f.thumbnail_key IS NULL AND f.cache_evicted=0) OR f.feature_version IS NULL OR f.feature_version<>?) LIMIT ?`,
+        `SELECT f.id FROM files_visible f JOIN roots r ON r.id=f.root_id WHERE f.missing=0 AND f.processing_error IS NULL AND NOT EXISTS(SELECT 1 FROM auto_new_images a WHERE a.file_id=f.id AND a.status='waiting') AND NOT EXISTS(SELECT 1 FROM local_cancelled_images x WHERE x.file_id=f.id AND x.bytes=f.bytes AND x.mtime_ms=f.mtime_ms) AND f.mtime_ms<=? AND r.status<>'offline' AND ((f.thumbnail_key IS NULL AND f.cache_evicted=0) OR f.feature_version IS NULL OR f.feature_version<>?) LIMIT ?`,
       )
       .all(
         Date.now() - 250,

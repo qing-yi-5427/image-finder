@@ -105,7 +105,7 @@ export async function safeResolve(
 }
 
 export class Scanner {
-  constructor(private catalog: Catalog) {}
+  constructor(private catalog: Catalog, private hooks: {observed?:(rootId:string,fileId:string,isNew:boolean,bytes:number,mtimeMs:number)=>void;scanned?:(rootId:string,result:ScanResult)=>void} = {}) {}
   async scan(
     rootId: string,
     options: {
@@ -248,8 +248,9 @@ export class Scanner {
             });
           if (!old) {
             const source = identifyArtwork(entry.name);
+            const fileId=randomUUID();
             insert.run(
-              randomUUID(),
+              fileId,
               rootId,
               relative,
               info.size,
@@ -267,6 +268,7 @@ export class Scanner {
                 : path.extname(entry.name).slice(1).toLowerCase(),
             );
             result.added++;
+            this.hooks.observed?.(rootId,fileId,true,info.size,info.mtimeMs);
           } else {
             const changed =
               old.bytes !== info.size ||
@@ -288,6 +290,7 @@ export class Scanner {
                 .prepare("DELETE FROM features WHERE file_id=?")
                 .run(old.id);
               result.changed++;
+              this.hooks.observed?.(rootId,old.id,false,info.size,info.mtimeMs);
             }
           }
         } catch (error) {
@@ -306,6 +309,7 @@ export class Scanner {
       .prepare("UPDATE roots SET status=?,last_scan_at=? WHERE id=?")
       .run(result.complete ? "online" : "partial", Date.now(), rootId);
     result.elapsedMs = Date.now() - started;
+    this.hooks.scanned?.(rootId,result);
     return result;
   }
   async relocateRoot(rootId: string, newPath: string): Promise<LibraryRoot> {

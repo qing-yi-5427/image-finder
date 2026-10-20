@@ -1,3 +1,4 @@
+import {AutoNewImages} from "./auto-new-images.js";
 import {ThumbnailCache} from "./thumbnail-cache.js";
 import { taskOverview } from "./task-overview.js";
 import { DanbooruQueue, type DanbooruReply } from "./danbooru.js";
@@ -26,6 +27,8 @@ export class ImageFinderService {
   sauce: SauceQueue;
   danbooru: DanbooruQueue;
   private closing = false;
+  autoNew!: AutoNewImages;
+  private exclusivePending=0;
   private thumbnailTasks = new Map<string, Promise<{ path: string }>>();
   private cancellation = new AbortController();
   private localCancellation = new AbortController();
@@ -51,7 +54,7 @@ export class ImageFinderService {
   ) {
     this.catalog = new Catalog(dataDir);
     this.cache=new ThumbnailCache(this.catalog,options.cachePreferenceFile);
-    this.scanner = new Scanner(this.catalog);
+    this.scanner = new Scanner(this.catalog,{observed:(...args)=>this.autoNew?.observed(...args),scanned:(...args)=>this.autoNew?.scanned(...args)});
     this.images = new ImageProcessor(this.catalog, dataDir);
     this.queue = new PixivQueue(this.catalog, { fetcher: options.fetcher });
 
@@ -74,11 +77,33 @@ export class ImageFinderService {
       this.ai.pause("semantic");
     }
     this.queue.start();
-    if(!options.cachePreferenceFile)void this.local.start();
     this.catalog.db.exec(
       "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
     );
+    this.autoNew=this.createAutoNew();
+    this.local.onBackgroundTurn=()=>this.autoNew.tick();
+    if(!options.cachePreferenceFile)void this.local.start();
   }
+  private createAutoNew(){return new AutoNewImages(this.catalog,{
+    canProcess:()=>!this.closing&&this.exclusivePending===0&&this.thumbnailTasks.size===0&&this.local.canProcessNewImages,
+    prepare:async(id)=>{
+      const prepare=async()=>{const signal=this.local.beginAutomaticImage();if(!await this.cachedThumbnail(id))await this.images.process(id,signal);if(signal.aborted)throw new Error("LOCAL_TASK_CANCELLED");};
+      if(this.local.inAutoNewTurn){await prepare();return;}
+      // Claim the owner's serialization tail before any cache I/O can yield to a scanner.
+      const work=this.localTail.then(()=>this.local.exclusive(prepare));
+      this.localTail=work.catch(()=>undefined);
+      await work;
+    },
+    reconcile:rootId=>this.local.reconcile(rootId),
+    enqueue:id=>{
+      this.ai.enqueue({kind:"wd",fileIds:[id],scope:"missing"});
+      this.ai.enqueue({kind:"semantic",fileIds:[id],scope:"missing"});
+      const f=this.catalog.getFile(id);
+      if(f.artworkId)this.queue.enqueue([f.artworkId]);
+      this.danbooru.enqueueFile(id);
+      if(!f.artworkId)this.sauce.enqueueFile(id);
+    },
+  });}
   private settings() {
     const row = this.catalog.db
       .prepare("SELECT value FROM settings WHERE key='cacheLimitBytes'")
@@ -86,6 +111,8 @@ export class ImageFinderService {
     return {
       dataDir: path.resolve(this.dataDir),
       dataDirectoryWarning:this.catalog.dataDirectoryWarning,
+      autoDiscoverNewImages:this.local.autoDiscoverNewImages,
+      autoProcessNewImages:this.autoNew.enabled(),
       cacheLimitBytes: row ? Number(row.value) : 5 * 1024 ** 3,
     };
   }
@@ -117,10 +144,11 @@ export class ImageFinderService {
         : exclusive
           ? this.local.exclusive(() => this.execute(method, payload))
           : this.execute(method, payload);
+    if(exclusive)this.exclusivePending++;
     const work = exclusive ? this.localTail.then(operation) : operation();
     if (exclusive) this.localTail = work.catch(() => undefined);
     this.pending.add(work);
-    void work.finally(() => this.pending.delete(work)).catch(() => undefined);
+    void work.finally(() => {this.pending.delete(work);if(exclusive)this.exclusivePending--;}).catch(() => undefined);
     return work;
   }
   private async cachedThumbnail(
@@ -446,6 +474,9 @@ export class ImageFinderService {
       case "local.retry":
       case "images.retry":
         return this.local.retry(p.fileIds);
+      case "local.registerNewImages":return this.autoNew.register(p.fileIds);
+      case "settings.setAutoProcessNewImages":this.autoNew.setEnabled(p.enabled);return this.settings();
+      case "settings.setAutoDiscoverNewImages":p.enabled?this.local.resume("scan"):this.local.pause("scan");return this.settings();
       case "settings.get":
         return this.settings();
       case "settings.update": {
@@ -462,6 +493,7 @@ export class ImageFinderService {
       case "system.export":
         return c.export(p.destination);
       case "system.restore": {
+        await this.autoNew.close();
         await this.danbooru.close();
         await this.sauce.close();
         await this.ai.close();
@@ -485,6 +517,8 @@ export class ImageFinderService {
 
           this.local = new LocalTasks(c, this.scanner, this.images);
           this.ai = new LocalAi(c,{home:this.ai.home});
+          this.autoNew=this.createAutoNew();
+    this.local.onBackgroundTurn=()=>this.autoNew.tick();
           void this.local.start();
         }
         return {
@@ -517,6 +551,7 @@ export class ImageFinderService {
   async close() {
     this.closing = true;
     this.cancellation.abort();
+    await this.autoNew.close();
     await this.danbooru.close();
     await this.sauce.close();
     await this.ai.close();

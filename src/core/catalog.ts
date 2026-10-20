@@ -1,3 +1,4 @@
+import {AUTO_NEW_SCHEMA} from "./auto-new-images.js";
 import {dataPathExclusion} from "./data-path.js";
 import {visibleFilesView,hasDotDirectory,excludedDirectorySql} from "./directory-policy.js";
 import {removeExcludedDirectoryRecords} from "./directory-migration.js";
@@ -108,6 +109,7 @@ export class Catalog {
   CREATE INDEX IF NOT EXISTS files_root ON files(root_id,missing); CREATE INDEX IF NOT EXISTS files_identity ON files(root_id,identity,bytes,mtime_ms); CREATE INDEX IF NOT EXISTS files_artwork ON files(artwork_id); CREATE INDEX IF NOT EXISTS files_added ON files(added_at DESC,id); CREATE INDEX IF NOT EXISTS files_dimensions ON files(height,width);
   CREATE INDEX IF NOT EXISTS artwork_tags_tag ON artwork_tags(tag_id,artwork_id); CREATE INDEX IF NOT EXISTS overrides_tag ON file_tag_overrides(tag_id,file_id,action); CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(status,next_run_at,priority);
   PRAGMA user_version=1;`);
+    this.db.exec(AUTO_NEW_SCHEMA);
     this.db.exec(visibleFilesView());
     this.db.exec("DROP VIEW IF EXISTS ai_auto_effective;DROP VIEW IF EXISTS ai_valid_runs;");
     this.db.exec(AI_EFFECTIVE_SCHEMA);
@@ -1340,12 +1342,12 @@ export class Catalog {
     const aiTables = (
       this.db
         .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND (name GLOB 'ai_*' OR name GLOB 'danbooru_*' OR name GLOB 'local_cancelled_*')",
+          "SELECT name FROM sqlite_master WHERE type='table' AND (name GLOB 'ai_*' OR name GLOB 'danbooru_*' OR name GLOB 'local_cancelled_*' OR name GLOB 'auto_new_*')",
         )
         .all() as any[]
     )
       .map((row) => String(row.name))
-      .filter((name) => (/^(ai|danbooru)_[a-z_]+$/.test(name)||['local_cancelled_images','local_cancelled_roots'].includes(name)));
+      .filter((name) => (/^(ai|danbooru)_[a-z_]+$/.test(name)||['local_cancelled_images','local_cancelled_roots','auto_new_roots','auto_new_images'].includes(name)));
     try {
       if (
         incoming.pragma("integrity_check", { simple: true }) !== "ok" ||
@@ -1415,10 +1417,10 @@ export class Catalog {
     ];
     for (const row of this.db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND (name GLOB 'ai_*' OR name GLOB 'danbooru_*' OR name GLOB 'local_cancelled_*')",
+        "SELECT name FROM sqlite_master WHERE type='table' AND (name GLOB 'ai_*' OR name GLOB 'danbooru_*' OR name GLOB 'local_cancelled_*' OR name GLOB 'auto_new_*')",
       )
       .all() as any[])
-      if ((/^(ai|danbooru)_[a-z_]+$/.test(row.name)||['local_cancelled_images','local_cancelled_roots'].includes(row.name))) tables.push(row.name);
+      if ((/^(ai|danbooru)_[a-z_]+$/.test(row.name)||['local_cancelled_images','local_cancelled_roots','auto_new_roots','auto_new_images'].includes(row.name))) tables.push(row.name);
     const snapshot = this.db.transaction(() =>
       Object.fromEntries(
         tables.map((t) => [t, this.db.prepare("SELECT * FROM " + t).all()]),

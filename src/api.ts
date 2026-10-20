@@ -38,6 +38,8 @@ export interface SettingsDto {
   dataDirectoryWarning?:string|null;
   dataDir: string;
   cacheLimitBytes: number;
+  autoDiscoverNewImages:boolean;
+  autoProcessNewImages:boolean;
 }
 export interface FileActionResult {
   successIds: string[];
@@ -286,6 +288,9 @@ export interface MethodMap extends importAiMethodMap {
     import("./electron/task-power-preference.js").TaskPowerStatus
   >;
   "settings.get": Route<Empty, SettingsDto>;
+  "settings.setAutoDiscoverNewImages": Route<{enabled:boolean},SettingsDto>;
+  "settings.setAutoProcessNewImages": Route<{enabled:boolean},SettingsDto>;
+  "local.registerNewImages": Route<{fileIds:string[]},{added:number}>;
   "settings.update": Route<{ cacheLimitBytes: number }, SettingsDto>;
   "network.status": Route<Empty, NetworkStatus>;
   "network.verify": Route<Empty, NetworkStatus>;

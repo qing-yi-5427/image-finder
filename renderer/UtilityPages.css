@@ -415,7 +415,7 @@
 .if-utilities .if-power-setting-row > .if-setting-copy { flex:1 1 auto; min-width:0; }
 .if-utilities .if-power-setting-row > input.if-power-switch { appearance:none; position:relative; flex:0 0 40px; width:40px; min-width:40px; max-width:40px; height:24px; padding:0; margin:0; border:1px solid var(--if-line); border-radius:999px; background:var(--if-muted); cursor:pointer; transition:background .15s; }
 .if-utilities .if-power-switch::before { content:""; position:absolute; left:3px; top:3px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 3px #0003; transition:transform .15s; }
-.if-utilities .if-power-switch:checked { background:var(--if-accent); }
+.if-utilities .if-power-setting-row > input.if-power-switch:checked { background:var(--if-accent); }
 .if-utilities .if-power-switch:checked::before { transform:translateX(16px); }
 .if-utilities .if-power-switch:focus-visible { outline:2px solid var(--if-accent); outline-offset:3px; }
 .if-utilities .if-power-switch:disabled { opacity:.55; cursor:wait; }

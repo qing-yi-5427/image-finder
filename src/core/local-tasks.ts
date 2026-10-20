@@ -16,8 +16,12 @@ export class LocalTasks {
   private worker: Promise<void> | null = null;
   private closed = false;
   private generation=0;
+  private automaticController=new AbortController();
+  beginAutomaticImage(){this.automaticController=new AbortController();return this.automaticController.signal;}
   async cancel() {
     this.generation++;
+    this.automaticController.abort();
+    this.stopWatchers();
     const roots=new Set([...this.state.pendingRoots,...(this.state.activeRoot?[this.state.activeRoot]:[])]);
     const cancelled=this.status().images.pending+roots.size;
     this.state.scanPaused=true;this.state.imagesPaused=true;
@@ -32,6 +36,10 @@ export class LocalTasks {
     return {cancelled};
   }
   private held = false;
+  private autoNewTurn=false;
+  onBackgroundTurn?:()=>Promise<void>;
+  get inAutoNewTurn(){return this.autoNewTurn;}
+  private async backgroundTurn(){if(this.closed||this.held)return;this.autoNewTurn=true;try{await this.onBackgroundTurn?.();}finally{this.autoNewTurn=false;}}
   private controller = new AbortController();
   private watchers: FSWatcher[] = [];
   private debounce = new Map<string, ReturnType<typeof setTimeout>>();
@@ -77,6 +85,9 @@ export class LocalTasks {
     this.state.activeRoot = null;
     this.save();
   }
+  get autoDiscoverNewImages(){return !this.state.scanPaused;}
+  get canProcessNewImages(){return !this.closed&&!this.held&&(!this.worker||this.autoNewTurn)&&!this.state.imagesPaused;}
+  reconcile(rootId:string){if(!this.closed&&!this.state.scanPaused){this.enqueue(rootId);this.kick();}}
   private save() {
     this.catalog.db
       .prepare(
@@ -116,7 +127,7 @@ export class LocalTasks {
   async start(options: { watch?: boolean } = {}): Promise<void> {
     if (this.closed) throw new Error("Local tasks closed");
     for (const root of this.catalog.roots()) this.enqueue(root.id);
-    if (options.watch !== false) this.refreshWatchers();
+    if (options.watch !== false && !this.state.scanPaused) this.refreshWatchers();
     this.kick();
     // Background start is nonblocking; callers can display status during reconciliation.
   }
@@ -126,9 +137,9 @@ export class LocalTasks {
       this.state.pendingRoots.push(rootId);
     this.emit();
   }
+  private stopWatchers(){for(const watcher of this.watchers)watcher.close();this.watchers=[];for(const timer of this.debounce.values())clearTimeout(timer);this.debounce.clear();}
   private refreshWatchers() {
-    for (const watcher of this.watchers) watcher.close();
-    this.watchers = [];
+    this.stopWatchers();
     for (const root of this.catalog.roots())
       try {
         const watcher = watch(root.path, { recursive: true }, (_event, filename) => {
@@ -160,15 +171,15 @@ export class LocalTasks {
       }
   }
   pause(kind: LocalTaskKind) {
-    if (kind === "scan") this.state.scanPaused = true;
-    else this.state.imagesPaused = true;
+    if (kind === "scan") {this.state.scanPaused = true;this.stopWatchers();}
+    else {this.state.imagesPaused = true;this.automaticController.abort();}
     this.controller.abort();
     this.emit();
     return this.status();
   }
   resume(kind: LocalTaskKind) {
     if (this.closed) throw new Error("Local tasks closed");
-    if (kind === "scan") this.state.scanPaused = false;
+    if (kind === "scan") {this.state.scanPaused = false;this.catalog.db.prepare("DELETE FROM local_cancelled_roots").run();this.refreshWatchers();for(const root of this.catalog.roots())this.enqueue(root.id);}
     else this.state.imagesPaused = false;
     this.emit();
     this.kick();
@@ -191,6 +202,7 @@ export class LocalTasks {
     });
     this.enqueue(rootId);
     this.state.scanPaused = false;
+    this.refreshWatchers();
     this.kick();
     return result;
   }
@@ -284,6 +296,7 @@ export class LocalTasks {
           this.state.activeRoot = null;
           this.emit();
         }
+        await this.backgroundTurn();
         await yieldTurn();
         continue;
       }
@@ -305,12 +318,14 @@ export class LocalTasks {
       this.state.processed += batch.processed;
       this.state.failed += batch.failed;
       this.emit();
+      await this.backgroundTurn();
       if (!batch.processed && !batch.failed) break;
       await yieldTurn();
     }
   }
   async close() {
     this.closed = true;
+    this.automaticController.abort();
     this.controller.abort();
     for (const watcher of this.watchers) watcher.close();
     for (const timer of this.debounce.values()) clearTimeout(timer);

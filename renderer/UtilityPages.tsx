@@ -475,6 +475,23 @@ export function SettingsPage({
     [mode, setMode] = useState<"system" | "direct" | "custom">("system"),
     [proxy, setProxy] = useState(""),
     [confirm, setConfirm] = useState<"restore" | "clearCache" | null>(null);
+  const [automationBusy, setAutomationBusy] = useState<"discover" | "process" | null>(null);
+  const [automationError, setAutomationError] = useState("");
+  useEffect(() => api.onProgress(event => setSettings(previous => previous && previous.autoDiscoverNewImages !== !event.local.scanPaused ? { ...previous, autoDiscoverNewImages: !event.local.scanPaused } : previous)), []);
+  const saveAutomation = async (kind: "discover" | "process", enabled: boolean) => {
+    if (automationBusy || !settings) return;
+    setAutomationBusy(kind);
+    setAutomationError("");
+    try {
+      const method = kind === "discover" ? "settings.setAutoDiscoverNewImages" : "settings.setAutoProcessNewImages";
+      setSettings(await api.invoke(method, { enabled }));
+      notify(`${enabled ? "已开启" : "已关闭"}${kind === "discover" ? "新增图片自动发现" : "新增图片自动处理"}`);
+    } catch (failure) {
+      setAutomationError(error(failure));
+    } finally {
+      setAutomationBusy(null);
+    }
+  };
   const [cache, setCache] = useState<{directory:string;requestedDirectory:string|null;error:string|null}|null>(null);
   const [cacheError, setCacheError] = useState("");
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -527,7 +544,7 @@ export function SettingsPage({
       <header className="if-utility-page-heading">
         <div>
           <h1 className="if-page-title">设置</h1>
-          <p className="if-subtitle">管理显示、缓存与来源连接。</p>
+          <p className="if-subtitle">管理显示、新增图片处理、缓存与来源连接。</p>
           <p className="if-subtitle" aria-label="当前运行版本">{appVersion?`Image Finder ${appVersion.version}${appVersion.packaged?"":" · 开发模式"}`:versionError?"运行版本读取失败":"正在读取运行版本…"}</p>
         </div>
       </header>
@@ -567,6 +584,25 @@ export function SettingsPage({
             </select>
           </div>
         </div>
+      </section>
+      <section className="if-settings-section" aria-label="新增图片自动处理">
+        <h2>新增图片</h2>
+        <div className="if-setting-row if-power-setting-row">
+          <label className="if-setting-copy" htmlFor="settings-auto-discover-new-images">自动扫描发现新增图片</label>
+          <input id="settings-auto-discover-new-images" className="if-power-switch" type="checkbox" role="switch" checked={settings?.autoDiscoverNewImages ?? false} disabled={!settings || !!automationBusy} aria-describedby="settings-auto-discover-description" onChange={event => void saveAutomation("discover", event.target.checked)} />
+        </div>
+        <p id="settings-auto-discover-description" className="if-setting-description">后台扫描已添加的目录，发现新增文件并建立索引。此开关与后台任务中的本地扫描同步；关闭会暂停扫描，已完成的索引保留。</p>
+        <p role="status">{automationBusy === "discover" ? "正在保存扫描设置…" : !settings ? "正在读取扫描设置…" : settings.autoDiscoverNewImages ? "已开启新增图片自动发现" : "已暂停后台扫描"}</p>
+        <div className="if-setting-row if-power-setting-row">
+          <label className="if-setting-copy" htmlFor="settings-auto-process-new-images">自动处理新增图片</label>
+          <input id="settings-auto-process-new-images" className="if-power-switch" type="checkbox" role="switch" checked={settings?.autoProcessNewImages ?? true} disabled={!settings || !!automationBusy} aria-describedby="settings-auto-process-description" onChange={event => void saveAutomation("process", event.target.checked)} />
+        </div>
+        <p id="settings-auto-process-description" className="if-setting-description">默认开启。目录扫描发现新增图片后，自动准备缩略图、生成 WD 自动标签与中文语义索引，并加入来源标签补全队列。</p>
+        <p className="if-setting-description">只处理扫描新发现的图片；开启不会重跑已有图库，也不会补处理关闭期间发现的图片。</p>
+        <p className="if-setting-description">来源补全按已有规则使用 Pixiv、Danbooru 或 SauceNAO。SauceNAO 仅在现有配置与同意条件满足时上传压缩预览图用于查源，候选结果仍需人工确认；原图不会上传。</p>
+        <p className="if-setting-description">手动暂停、登录状态、请求间隔、额度与保护暂停仍然有效；已暂停的任务队列只加入待办，需手动继续。</p>
+        <p role="status">{automationBusy === "process" ? "正在保存处理设置…" : !settings ? "正在读取处理设置…" : settings.autoProcessNewImages ? "已开启新增图片自动处理" : "已关闭新增图片自动处理"}</p>
+        {automationError && <p className="if-ai-error" role="alert">保存失败：{automationError}</p>}
       </section>
       <section className="if-settings-section">
         <h2>索引与缓存</h2>

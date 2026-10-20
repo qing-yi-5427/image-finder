@@ -394,6 +394,9 @@ for (const m of ["local.pause", "local.resume"])
   route(m, { kind: one(["scan", "images"]) });
 for (const m of ["local.retry", "images.retry"]) route(m, { fileIds: ids }, []);
 route("settings.update", { cacheLimitBytes: integer });
+route("settings.setAutoDiscoverNewImages",{enabled:bool});
+route("settings.setAutoProcessNewImages",{enabled:bool});
+route("local.registerNewImages",{fileIds:(v)=>ids(v)&&(v as any[]).length>0&&(v as any[]).length<=500});
 route("system.restore", { source: str });
 const aiKind = one(["wd", "semantic"]);
 for (const name of ["ai.status", "ai.progress", "ai.install"]) route(name);
