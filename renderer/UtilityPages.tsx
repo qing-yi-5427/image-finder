@@ -469,6 +469,9 @@ export function SettingsPage({
   setDensity: (density: "comfortable" | "compact") => void;
   notify: Notify;
 }) {
+  const [category, setCategory] = useState("general");
+  const settingsTop = useRef<HTMLDivElement>(null);
+  const categories = [["general", "常规", "显示与自动处理"], ["storage", "存储与数据", "缓存、备份与维护"], ["ai", "本地 AI", "模型与分析配置"], ["sources", "来源连接", "Pixiv、SauceNAO 与 Danbooru"]] as const;
   const [settings, setSettings] = useState<SettingsDto | null>(null),
     [network, setNetwork] = useState<NetworkStatus | null>(null),
     [limit, setLimit] = useState("10"),
@@ -548,6 +551,13 @@ export function SettingsPage({
           <p className="if-subtitle" aria-label="当前运行版本">{appVersion?`Image Finder ${appVersion.version}${appVersion.packaged?"":" · 开发模式"}`:versionError?"运行版本读取失败":"正在读取运行版本…"}</p>
         </div>
       </header>
+      <div className="if-settings-layout" ref={settingsTop}>
+        <nav className="if-settings-navigation" aria-label="设置分类">
+          {categories.map(([id, label, hint]) => <button key={id} type="button" aria-current={category === id ? "page" : undefined} aria-controls={`settings-panel-${id}`} onClick={() => { setCategory(id); settingsTop.current?.scrollIntoView({ block: "start" }); }}><strong>{label}</strong><span>{hint}</span></button>)}
+        </nav>
+        <div className="if-settings-content">
+          <div id="settings-panel-general" className="if-settings-panel" role="region" aria-label="常规" hidden={category !== "general"}>
+            <div className="if-settings-category-heading"><h2>常规</h2><p>调整界面与新增图片的默认处理方式。</p></div>
       <section className="if-settings-section">
         <h2>外观</h2>
         <div className="if-setting-row">
@@ -592,18 +602,33 @@ export function SettingsPage({
           <input id="settings-auto-discover-new-images" className="if-power-switch" type="checkbox" role="switch" checked={settings?.autoDiscoverNewImages ?? false} disabled={!settings || !!automationBusy} aria-describedby="settings-auto-discover-description" onChange={event => void saveAutomation("discover", event.target.checked)} />
         </div>
         <p id="settings-auto-discover-description" className="if-setting-description">后台扫描已添加的目录，发现新增文件并建立索引。此开关与后台任务中的本地扫描同步；关闭会暂停扫描，已完成的索引保留。</p>
-        <p role="status">{automationBusy === "discover" ? "正在保存扫描设置…" : !settings ? "正在读取扫描设置…" : settings.autoDiscoverNewImages ? "已开启新增图片自动发现" : "已暂停后台扫描"}</p>
+        <p className="if-setting-status" role="status">{automationBusy === "discover" ? "正在保存扫描设置…" : !settings ? "正在读取扫描设置…" : settings.autoDiscoverNewImages ? "已开启新增图片自动发现" : "已暂停后台扫描"}</p>
         <div className="if-setting-row if-power-setting-row">
           <label className="if-setting-copy" htmlFor="settings-auto-process-new-images">自动处理新增图片</label>
           <input id="settings-auto-process-new-images" className="if-power-switch" type="checkbox" role="switch" checked={settings?.autoProcessNewImages ?? true} disabled={!settings || !!automationBusy} aria-describedby="settings-auto-process-description" onChange={event => void saveAutomation("process", event.target.checked)} />
         </div>
         <p id="settings-auto-process-description" className="if-setting-description">默认开启。目录扫描发现新增图片后，自动准备缩略图、生成 WD 自动标签与中文语义索引，并加入来源标签补全队列。</p>
         <p className="if-setting-description">只处理扫描新发现的图片；开启不会重跑已有图库，也不会补处理关闭期间发现的图片。</p>
+        <details className="if-settings-disclosure"><summary>来源补全与队列规则</summary>
         <p className="if-setting-description">来源补全按已有规则使用 Pixiv、Danbooru 或 SauceNAO。SauceNAO 仅在现有配置与同意条件满足时上传压缩预览图用于查源，候选结果仍需人工确认；原图不会上传。</p>
         <p className="if-setting-description">手动暂停、登录状态、请求间隔、额度与保护暂停仍然有效；已暂停的任务队列只加入待办，需手动继续。</p>
-        <p role="status">{automationBusy === "process" ? "正在保存处理设置…" : !settings ? "正在读取处理设置…" : settings.autoProcessNewImages ? "已开启新增图片自动处理" : "已关闭新增图片自动处理"}</p>
+        </details>
+        <p className="if-setting-status" role="status">{automationBusy === "process" ? "正在保存处理设置…" : !settings ? "正在读取处理设置…" : settings.autoProcessNewImages ? "已开启新增图片自动处理" : "已关闭新增图片自动处理"}</p>
         {automationError && <p className="if-ai-error" role="alert">保存失败：{automationError}</p>}
       </section>
+      <section className="if-settings-section" aria-label="后台任务与睡眠">
+        <h2>后台任务与睡眠</h2>
+        <div className="if-setting-row if-power-setting-row">
+          <label className="if-setting-copy" htmlFor="settings-prevent-sleep">后台任务运行时防止电脑睡眠</label>
+          <input id="settings-prevent-sleep" className="if-power-switch" type="checkbox" role="switch" checked={power?.enabled??false} disabled={!power||powerBusy} onChange={event=>{const enabled=event.target.checked;setPower(value=>value?{...value,enabled}:value);setPowerBusy(true);setPowerError("");void api.invoke("power.set",{enabled}).then(setPower).catch(async e=>{setPowerError(error(e));try{setPower(await api.invoke("power.get",{}))}catch{}}).finally(()=>setPowerBusy(false));}}/>
+        </div>
+        <p className="if-subtitle">默认关闭。开启后仅在后台任务运行或正常批次休息时防止睡眠；无任务或保护暂停时释放。关闭后补全仍会继续，电脑按 Windows 设置睡眠。</p>
+        <p className="if-setting-status" role="status">{powerBusy?"正在保存…":power?.enabled?"已开启，按任务状态自动控制":"已关闭，遵循 Windows 睡眠设置"}</p>
+        {(powerError||power?.error)&&<p role="alert">{powerError||power?.error}</p>}
+      </section>
+          </div>
+          <div id="settings-panel-storage" className="if-settings-panel" role="region" aria-label="存储与数据" hidden={category !== "storage"}>
+            <div className="if-settings-category-heading"><h2>存储与数据</h2><p>查看使用位置，管理缓存与整理数据。</p></div>
       <section className="if-settings-section">
         <h2>索引与缓存</h2>
         <div className="if-setting-row">
@@ -668,16 +693,42 @@ export function SettingsPage({
           </Button>
         </div>
       </section>
-      <section className="if-settings-section" aria-label="后台任务与睡眠">
-        <h2>后台任务与睡眠</h2>
-        <div className="if-setting-row if-power-setting-row">
-          <label className="if-setting-copy" htmlFor="settings-prevent-sleep">后台任务运行时防止电脑睡眠</label>
-          <input id="settings-prevent-sleep" className="if-power-switch" type="checkbox" role="switch" checked={power?.enabled??false} disabled={!power||powerBusy} onChange={event=>{const enabled=event.target.checked;setPower(value=>value?{...value,enabled}:value);setPowerBusy(true);setPowerError("");void api.invoke("power.set",{enabled}).then(setPower).catch(async e=>{setPowerError(error(e));try{setPower(await api.invoke("power.get",{}))}catch{}}).finally(()=>setPowerBusy(false));}}/>
-        </div>
-        <p className="if-subtitle">默认关闭。开启后仅在后台任务运行或正常批次休息时防止睡眠；无任务或保护暂停时释放。关闭后补全仍会继续，电脑按 Windows 设置睡眠。</p>
-        <p role="status">{powerBusy?"正在保存…":power?.enabled?"已开启，按任务状态自动控制":"已关闭，遵循 Windows 睡眠设置"}</p>
-        {(powerError||power?.error)&&<p role="alert">{powerError||power?.error}</p>}
+      <section className="if-settings-section">
+        <h2>备份与恢复</h2>
+        <p className="if-setting-description">备份完整索引，或导出整理数据。恢复前建议先保存当前备份。</p>
+        <Button
+          disabled={busy}
+          onClick={() =>
+            act(async () => {
+              const p = await api.invoke("system.backup", {});
+              if (p) notify(`备份已保存：${p}`);
+            })
+          }
+        >
+          备份索引
+        </Button>{" "}
+        <Button
+          disabled={busy}
+          onClick={() =>
+            act(async () => {
+              const p = await api.invoke("system.export", {});
+              if (p) notify(`导出已保存：${p}`);
+            })
+          }
+        >
+          导出整理数据
+        </Button>{" "}
+        <Button disabled={busy} onClick={() => setConfirm("restore")}>
+          从备份恢复
+        </Button>
       </section>
+          </div>
+          <div id="settings-panel-ai" className="if-settings-panel" role="region" aria-label="本地 AI" hidden={category !== "ai"}>
+            <div className="if-settings-category-heading"><h2>本地 AI</h2><p>查看环境状态，配置标签分析与推理设备。</p></div>
+      <AiEnvironmentSettings notify={notify} />
+          </div>
+          <div id="settings-panel-sources" className="if-settings-panel" role="region" aria-label="来源连接" hidden={category !== "sources"}>
+            <div className="if-settings-category-heading"><h2>来源连接</h2><p>连接图片来源，配置查源服务与请求规则。</p></div>
       <section className="if-settings-section">
         <h2>Pixiv 连接</h2>
         <p role="status" aria-live="polite">{networkSummary(network)}</p>
@@ -749,44 +800,20 @@ export function SettingsPage({
         </Button>
       </section>
       <section className="if-settings-section">
-        <h2>Pixiv 请求与批次</h2>
+        <details className="if-settings-disclosure"><summary>请求间隔与批次设置</summary>
         <PixivQueueSettingsForm notify={notify} />
+        </details>
       </section>
       <section className="if-settings-section">
-        <h2>按目录批量补全 Pixiv</h2>
+        <details className="if-settings-disclosure"><summary>按目录批量补全 Pixiv</summary>
         <PixivBatchPanel notify={notify}/>
+        </details>
       </section>
-      <AiEnvironmentSettings notify={notify} />
       <SauceSettings notify={notify} />
       <DanbooruSettings />
-      <section className="if-settings-section">
-        <h2>数据管理</h2>
-        <Button
-          disabled={busy}
-          onClick={() =>
-            act(async () => {
-              const p = await api.invoke("system.backup", {});
-              if (p) notify(`备份已保存：${p}`);
-            })
-          }
-        >
-          备份索引
-        </Button>{" "}
-        <Button
-          disabled={busy}
-          onClick={() =>
-            act(async () => {
-              const p = await api.invoke("system.export", {});
-              if (p) notify(`导出已保存：${p}`);
-            })
-          }
-        >
-          导出整理数据
-        </Button>{" "}
-        <Button disabled={busy} onClick={() => setConfirm("restore")}>
-          从备份恢复
-        </Button>
-      </section>
+          </div>
+        </div>
+      </div>
       {confirm && (
         <Modal
           title={confirm === "restore" ? "从备份恢复？" : "清理图片缓存？"}

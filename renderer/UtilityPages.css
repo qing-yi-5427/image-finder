@@ -437,3 +437,57 @@
 .if-task-overview-card .if-task-primary-action>.if-queue-note{flex-basis:100%;margin:0}
 
 .if-utilities .if-task-overview-grid>.if-task-overview-card>.if-task-body>.if-task-owned-details{border-top:1px solid var(--if-line);border-bottom:0;flex-shrink:0}
+/* Settings uses a small local index; each category keeps its mounted form drafts. */
+.if-utilities.if-settings-page { max-width: 1200px; margin: 0 auto; }
+.if-settings-layout { display:grid; grid-template-columns:164px minmax(0,1fr); gap:32px; align-items:start; scroll-margin-top:20px; }
+.if-settings-navigation { display:flex; flex-direction:column; gap:5px; position:sticky; top:20px; }
+.if-settings-navigation button { text-align:left; display:flex; flex-direction:column; gap:5px; border:1px solid transparent; background:transparent; padding:12px; border-radius:7px; color:var(--if-sub); cursor:pointer; min-width:0; }
+.if-settings-navigation button strong { font-size:13px; font-weight:550; }
+.if-settings-navigation button span { font-size:10px; line-height:1.5; color:var(--if-muted); }
+.if-settings-navigation button:hover { background:var(--if-hover); }
+.if-settings-navigation button[aria-current="page"] { background:var(--if-hover); color:var(--if-accent); border-color:var(--if-line); }
+.if-settings-navigation button:focus-visible,.if-settings-disclosure>summary:focus-visible { outline:2px solid var(--if-accent); outline-offset:3px; }
+.if-settings-content,.if-settings-panel { min-width:0; }
+.if-settings-panel[hidden] { display:none !important; }
+.if-settings-category-heading { padding:9px 0 20px; border-bottom:1px solid var(--if-line); }
+.if-settings-category-heading h2 { font-size:18px; font-weight:550; margin:0 0 7px; }
+.if-settings-category-heading p { font-size:12px; color:var(--if-muted); line-height:1.6; margin:0; }
+.if-utilities .if-settings-panel>.if-settings-section { margin:0; padding:22px 0; border:0; border-bottom:1px solid var(--if-line); border-radius:0; background:transparent; }
+.if-utilities .if-settings-panel>.if-settings-section:last-child { border-bottom:0; }
+.if-utilities .if-settings-panel .if-settings-section h2 { font-size:14px; margin-bottom:14px; }
+.if-utilities .if-settings-panel .if-setting-row { min-height:56px; padding:11px 0; }
+.if-utilities .if-settings-panel .if-setting-description { line-height:1.75; overflow-wrap:anywhere; }
+.if-settings-panel .if-settings-disclosure { margin:12px 0 0; min-width:0; }
+.if-settings-panel .if-settings-disclosure>summary { cursor:pointer; font-size:12px; font-weight:500; color:var(--if-sub); line-height:1.7; }
+.if-settings-disclosure[open]>summary { margin-bottom:16px; }
+.if-settings-panel .if-settings-section:has(>.if-settings-disclosure) { padding:16px 0; }
+.if-settings-panel .if-settings-section>.if-settings-disclosure { margin:0; }
+.if-settings-panel .if-ai-config { margin:20px 0; }
+.if-settings-panel .if-ai-model-summary { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 18px; }
+.if-ai-model-summary span { padding:5px 9px; border:1px solid var(--if-line); border-radius:5px; color:var(--if-sub); font-size:11px; }
+.if-settings-panel .if-ai-heading { flex-wrap:wrap; gap:10px; }
+.if-settings-panel .if-setting-control { min-width:0; }
+.if-settings-panel .if-input,.if-settings-panel .if-select { max-width:100%; min-width:0; }
+.if-settings-panel .if-ai-environment-facts dd { overflow-wrap:anywhere; min-width:0; }
+@container settings-page (max-width:720px) {
+ .if-settings-layout { grid-template-columns:minmax(0,1fr); gap:20px; }
+ .if-settings-navigation { position:static; flex-direction:row; flex-wrap:wrap; gap:5px; padding-bottom:12px; border-bottom:1px solid var(--if-line); }
+ .if-settings-navigation button { padding:9px 11px; }
+ .if-settings-navigation button span { display:none; }
+ .if-settings-category-heading { padding-top:0; }
+}
+@container settings-page (max-width:440px) {
+ .if-settings-navigation { gap:2px; }
+ .if-settings-navigation button { padding:9px 7px; }
+ .if-settings-navigation button strong { font-size:12px; }
+ .if-settings-panel .if-setting-control { width:100%; max-width:100%; flex-wrap:wrap; }
+ .if-settings-panel .if-ai-config { grid-template-columns:minmax(0,1fr); }
+}
+.if-utilities.if-settings-page>.if-settings-layout,.if-utilities.if-settings-page>.if-utility-page-heading { max-width:1100px; width:100%; }
+.if-settings-panel .if-ai-environment-models p,.if-settings-panel [role="alert"] { overflow-wrap:anywhere; }
+
+.if-utilities #settings-panel-general .if-power-setting-row { min-height:38px; padding:5px 0; border-bottom:0; }
+.if-utilities #settings-panel-general .if-settings-section { padding:18px 0; }
+.if-utilities #settings-panel-general .if-settings-section:has(>.if-settings-disclosure) { padding:18px 0; }
+.if-utilities #settings-panel-general .if-setting-status { display:table; margin:7px 0 12px; padding:2px 7px; border-radius:4px; background:var(--if-hover); color:var(--if-sub); font-size:10px; line-height:1.6; }
+.if-utilities #settings-panel-general .if-settings-section>.if-setting-status:last-child { margin-bottom:0; }
