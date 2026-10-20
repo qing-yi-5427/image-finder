@@ -328,3 +328,39 @@ test("merging an accepted AI tag and undo preserve the independent review associ
     f.catalog.close();
   }
 });
+
+
+test("a decode failure is skipped and following images finish without pausing", async () => {
+  const f = await fixture({run: async (_kind: string, payload: any) => {
+    if (path.basename(payload.path) === "a.png") throw new Error("AI_INPUT_ERROR: broken PNG checksum");
+    return {elapsedMs: 1, providers: ["fixture"], candidates: []};
+  },close() {}});
+  try {
+    f.ai.enqueue({kind:"wd",fileIds:["a","b","c"]}); f.ai.resume("wd");
+    const q = await done(f.ai,"wd");
+    assert.equal(q.counts.failed,1); assert.equal(q.counts.done,2); assert.equal(q.paused,false);
+  } finally { await f.ai.close(); f.catalog.close(); }
+});
+
+test("environment errors pause only their queue and resume clears the blocker", async () => {
+  const f = await fixture({run: async () => {throw new Error("AI_ENVIRONMENT_ERROR: model load failed");},close() {}});
+  try {
+    f.ai.enqueue({kind:"wd",fileIds:["a","b","c","d"]}); f.ai.resume("wd");
+    await (f.ai as any).activeWork.get("wd");
+    const q=f.ai.status().queues[0];
+    assert.equal(q.paused,true);assert.equal(q.counts.failed,1);assert.equal(q.counts.waiting,3);
+    assert.match(q.blockingError!,/model load failed/);
+    f.fake.run=async()=>({elapsedMs:1,providers:["fixture"],candidates:[]});
+    f.ai.resume("wd");await done(f.ai,"wd");
+    assert.equal(f.ai.status().queues[0].blockingError,null);
+  } finally { await f.ai.close(); f.catalog.close(); }
+});
+
+test("three consecutive worker failures stop the queue before consuming remaining files", async () => {
+  const f = await fixture({run: async () => {throw new Error("AI_INFERENCE_TIMEOUT");},close() {}});
+  try {
+    f.ai.enqueue({kind:"wd",fileIds:["a","b","c","d"]}); f.ai.resume("wd");
+    for(let i=0;i<100&&!f.ai.status().queues[0].paused;i++)await new Promise(r=>setTimeout(r,20));
+    const q=f.ai.status().queues[0];assert.equal(q.paused,true);assert.equal(q.counts.failed,3);assert.equal(q.counts.waiting,1);
+  } finally { await f.ai.close(); f.catalog.close(); }
+});

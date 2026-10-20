@@ -23,7 +23,15 @@ def execution(sess,name):
     result={'profile':profile,'nodeProviders':counts}
     (HOME/f'{KIND}-gpu-profile-summary.json').write_text(json.dumps(result),encoding='utf-8')
     return result
+class EnvironmentInferenceError(Exception): pass
+
 def session(name, filename):
+    try:
+        return load_session(name, filename)
+    except Exception as error:
+        raise EnvironmentInferenceError(str(error)) from error
+
+def load_session(name, filename):
     if name not in sessions:
         # Portable copies may change mtimes. Verify actual bytes before the first load.
         marker=json.loads((HOME/'models-ready.json').read_text(encoding='utf-8'))
@@ -47,12 +55,17 @@ def session(name, filename):
             options.profile_file_prefix=str(HOME/f'{KIND}-ort-profile')
         sessions[name] = ort.InferenceSession(str(HOME/'models'/KIND/filename), sess_options=options, providers=providers)
     return sessions[name]
+class InputImageError(Exception): pass
+
 def image(path):
-    with Image.open(path) as source:
-        source=ImageOps.exif_transpose(source).convert('RGBA')
-        canvas=Image.new('RGBA',source.size,'white')
-        canvas.alpha_composite(source)
-        return canvas.convert('RGB')
+    try:
+        with Image.open(path) as source:
+            source=ImageOps.exif_transpose(source).convert('RGBA')
+            canvas=Image.new('RGBA',source.size,'white')
+            canvas.alpha_composite(source)
+            return canvas.convert('RGB')
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as error:
+        raise InputImageError(str(error)) from error
 def normalize(value):
     vector = np.asarray(value,dtype=np.float32).reshape(-1)
     length=np.linalg.norm(vector)
@@ -99,5 +112,5 @@ for line in sys.stdin:
         reply={'id':request['id'],'result':infer(request)}
     except Exception as error:
         traceback.print_exc(file=sys.stderr)
-        reply={'id':request.get('id') if 'request' in globals() else None,'error':str(error)}
+        reply={'id':request.get('id') if 'request' in globals() else None,'error':str(error),'errorKind':'input' if isinstance(error,InputImageError) else 'environment' if isinstance(error,(EnvironmentInferenceError,ImportError)) else 'runtime'}
     print(json.dumps(reply,ensure_ascii=True),flush=True)

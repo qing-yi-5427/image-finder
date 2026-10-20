@@ -37,3 +37,5 @@
 .if-ai-candidate-actions .if-button { font-size: 11px; padding: 3px 9px; min-height: 28px; }
 
 .if-ai-environment-facts{display:grid;grid-template-columns:90px minmax(0,1fr);gap:9px 16px;font-size:12px;margin:16px 0}.if-ai-environment-facts dt{color:var(--if-sub)}.if-ai-environment-facts dd{margin:0;overflow-wrap:anywhere}.if-ai-environment-models{display:grid;gap:12px;margin:16px 0;font-size:12px}.if-ai-environment-models p{color:var(--if-sub);font-size:11px;overflow-wrap:anywhere;margin:4px 0}.if-ai-environment .if-ai-config input{max-width:100%}
+
+.if-ai-failure p { line-height: 1.7; overflow-wrap: anywhere; margin: 6px 0; }

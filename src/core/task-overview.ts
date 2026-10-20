@@ -22,6 +22,8 @@ export interface TaskOverviewCard {
   };
   paused: boolean;
   reason: string | null;
+  lastError?: string | null;
+  queueState?: "running" | "waiting" | "paused" | "blocked" | "idle";
 }
 export interface TaskOverview {
   scope: {
@@ -129,7 +131,7 @@ export function taskOverview(
       kind === "wd"
         ? "SELECT count(*) n FROM scoped f JOIN ai_valid_runs r ON r.file_id=f.id AND r.kind='wd'"
         : "SELECT count(*) n FROM scoped f JOIN ai_valid_runs r ON r.file_id=f.id AND r.kind='semantic' JOIN ai_vectors v ON v.file_id=f.id AND v.model_version=r.model_version WHERE v.dimension=512 AND length(v.vector)=2048";
-    return card(
+    const result = card(
       kind,
       label,
       count(valid),
@@ -138,8 +140,11 @@ export function taskOverview(
         kind,
       ),
       !!state?.paused,
-      state?.lastError ?? null,
+      state?.blockingError ?? null,
     );
+    result.lastError = state?.lastError ?? null;
+    result.queueState = state?.blockingError ? "blocked" : state?.paused ? "paused" : state?.activeFileId || state?.counts?.running ? "running" : state?.counts?.waiting ? "waiting" : "idle";
+    return result;
   };
   const wd = aiCard("wd", "WD 自动标签");
   wd.coverage.automaticTagged = count(

@@ -57,13 +57,16 @@ export function AiTasksPanel({ notify, onlyKind }: { notify: Notify; onlyKind?: 
     {status && <>
       {status.queues.filter(queue => !onlyKind || queue.kind === onlyKind).map(queue => {
         const model = status.models.find(m => m.kind === queue.kind);
+        const queueState = queue.blockingError ? "已阻断" : queue.paused ? "已暂停" : queue.activeFileId || queue.counts.running ? "正在处理" : queue.counts.waiting ? "等待处理" : "空闲";
         return <article className="if-task-group" key={queue.kind}>
-          <div className="if-task-heading"><div className="if-task-title"><h2>{kindName(queue.kind)}</h2><p>{model?.ready ? "模型就绪" : "模型尚未就绪"} · {queue.paused ? "已暂停" : queue.activeFileId ? "正在处理" : "等待任务"}</p></div>
+          <div className="if-task-heading"><div className="if-task-title"><h2>{kindName(queue.kind)}</h2><p>{model?.ready ? "模型就绪" : "模型尚未就绪"} · {queueState}</p></div>
             <Button disabled={busy || (!queue.paused ? false : !model?.ready)} onClick={() => void act(() => api.invoke(queue.paused ? "ai.resume" : "ai.pause", { kind: queue.kind }))}>{queue.paused ? "继续" : "暂停"}</Button>
             <Button disabled={busy || !queue.counts.failed} onClick={() => void act(() => api.invoke("ai.retry", { kind: queue.kind }))}>重试失败</Button>
           </div>
-          <div className="if-task-body"><QueueProgress counts={queue.counts} label={queue.kind === "wd" ? "WD 自动标签" : "中文语义索引"} state={queue.paused ? "已暂停" : queue.activeFileId || queue.counts.running ? "正在处理" : queue.counts.waiting ? "等待处理" : "空闲"} /><p className="if-ai-hint">有效结果覆盖 {queue.indexed.toLocaleString()} / {queue.total.toLocaleString()} 张图库图片 · 已过期 {queue.stale.toLocaleString()}（覆盖率与队列进度分别统计）</p>
-            {queue.lastError && <p className="if-ai-error" role="alert">{queue.lastError}</p>}
+          <div className="if-task-body"><QueueProgress counts={queue.counts} label={queue.kind === "wd" ? "WD 自动标签" : "中文语义索引"} state={queueState} /><p className="if-ai-hint">有效结果覆盖 {queue.indexed.toLocaleString()} / {queue.total.toLocaleString()} 张图库图片 · 已过期 {queue.stale.toLocaleString()}（覆盖率与队列进度分别统计）</p>
+            {queue.blockingError && <p className="if-ai-error" role="alert">队列已阻断：{queue.blockingError}</p>}
+            {!!queue.counts.failed && <p className="if-ai-hint">失败图片已跳过，计入已处理；可点击“重试失败”重新加入队列。</p>}
+            {queue.lastError && queue.lastError !== queue.blockingError && <details className="if-ai-summary if-ai-failure"><summary>最近失败（已跳过）</summary><p>{queue.lastError}</p></details>}
             <details className="if-ai-model-detail"><summary>模型详情{!model?.ready ? " · 尚未就绪" : ""}</summary><p className="if-ai-hint">{model?.id} · {model?.version} · {model?.license}</p>{!!model?.filesMissing.length && <p className="if-ai-hint">缺少：{model.filesMissing.join("、")}</p>}</details>
           </div>
         </article>;

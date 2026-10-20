@@ -23,6 +23,7 @@ export interface AiStatus {
     paused: boolean;
     activeFileId: string | null;
     lastError?: string | null;
+    blockingError?: string | null;
     counts: { waiting: number; running: number; done: number; failed: number; cancelled?:number };
     indexed: number;
     stale: number;

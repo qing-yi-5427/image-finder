@@ -71,7 +71,7 @@ interface Runtime {
   close(): void;
   closeForMaintenance?():Promise<void>;
 }
-class PythonRuntime implements Runtime {
+export class PythonRuntime implements Runtime {
   private workers = new Map<
     AiKind,
     {
@@ -85,12 +85,14 @@ class PythonRuntime implements Runtime {
         }
       >;
       idle: NodeJS.Timeout | null;
+      dispose: (error: Error) => void;
     }
   >();
   private serial = 0;
   constructor(
     private home: string,
     private python: string | (()=>string),
+    private limits = { timeoutMs: 180000, idleMs: 30000 },
   ) {}
   run(
     kind: AiKind,
@@ -113,7 +115,7 @@ class PythonRuntime implements Runtime {
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
-      worker = { child, pending: new Map(), idle: null };
+      worker = { child, pending: new Map(), idle: null, dispose: () => {} };
       this.workers.set(kind, worker);
       const owned = worker;
       createInterface({ input: child.stdout }).on("line", (line) => {
@@ -124,13 +126,12 @@ class PythonRuntime implements Runtime {
           clearTimeout(pending.timer);
           owned.pending.delete(response.id);
           response.error
-            ? pending.reject(new Error(response.error))
+            ? pending.reject(new Error(`${response.errorKind === "environment" ? "AI_ENVIRONMENT_ERROR: " : response.errorKind === "input" ? "AI_INPUT_ERROR: " : response.errorKind === "runtime" ? "AI_WORKER_ERROR: " : ""}${response.error}`))
             : pending.resolve(response.result);
           if (!owned.pending.size)
             owned.idle = setTimeout(() => {
-              child.kill();
-              this.workers.delete(kind);
-            }, 30000);
+              owned.dispose(new Error("AI_WORKER_IDLE"));
+            }, this.limits.idleMs);
         } catch {}
       });
       child.stderr.on("data", () => {});
@@ -143,6 +144,8 @@ class PythonRuntime implements Runtime {
         if (owned.idle) clearTimeout(owned.idle);
         if (this.workers.get(kind) === owned) this.workers.delete(kind);
       };
+      owned.dispose = (error) => { reject(error); child.kill(); };
+      child.stdin.on("error", (error) => owned.dispose(error));
       child.on("error", reject);
       child.on("exit", () => reject(new Error("AI_WORKER_EXITED")));
     }
@@ -151,17 +154,15 @@ class PythonRuntime implements Runtime {
     return new Promise((resolve, reject) => {
       const id = ++this.serial;
       const timer = setTimeout(() => {
-        current.child.kill();
-        reject(new Error("AI_INFERENCE_TIMEOUT"));
-      }, 180000);
+        current.dispose(new Error("AI_INFERENCE_TIMEOUT"));
+      }, this.limits.timeoutMs);
       current.pending.set(id, { resolve, reject, timer });
       current.child.stdin.write(JSON.stringify({ id, ...payload }) + "\n");
     });
   }
   close() {
     for (const worker of this.workers.values()) {
-      if (worker.idle) clearTimeout(worker.idle);
-      worker.child.kill();
+      worker.dispose(new Error("AI_WORKER_CLOSED"));
     }
     this.workers.clear();
   }
@@ -187,6 +188,8 @@ export class LocalAi {
   private activeWork = new Map<AiKind, Promise<void>>();
   private work = new Set<Promise<void>>();
   private generations = {wd:0,semantic:0};
+  private blockingErrors = new Map<AiKind, string>();
+  private consecutiveRuntimeFailures = {wd:0,semantic:0};
   private maintenance=false;
   private homeUnavailable=false;
   private searches=0;
@@ -416,6 +419,7 @@ export class LocalAi {
               .get(kind) as any
           ).paused,
           activeFileId: this.active.get(kind) ?? null,
+          blockingError: this.blockingErrors.get(kind) ?? null,
           counts,
           indexed,
           stale: runs.total - indexed,
@@ -537,6 +541,8 @@ export class LocalAi {
   }
   resume(kind: AiKind) {
     this.requireAvailable();
+    this.blockingErrors.delete(kind);
+    this.consecutiveRuntimeFailures[kind] = 0;
     const model = this.status().models.find((model) => model.kind === kind)!;
     if (!model.ready) throw new Error("AI_MODEL_MISSING");
     this.catalog.db
@@ -671,6 +677,7 @@ export class LocalAi {
         },
         config.provider,
       );
+      this.consecutiveRuntimeFailures[kind] = 0;
       const current = this.catalog.getFile(fileId);
       const after = await stat(await this.catalog.resolveOriginal(fileId));
       if (
@@ -734,10 +741,19 @@ export class LocalAi {
         if (kind === "wd") this.catalog.registerAutomaticTags(fileId);
       })();
     } catch (error) {
-      if (!this.closing && generation===this.generations[kind])
+      if (!this.closing && generation===this.generations[kind]) {
+        const message = String(error);
+        const environment = /AI_ENVIRONMENT_ERROR|AI_MODEL_HASH_MISMATCH|DIRECTML_UNAVAILABLE|ENOENT.*python|spawn .*ENOENT/.test(message);
+        const runtime = /AI_INFERENCE_TIMEOUT|AI_WORKER_EXITED|AI_WORKER_ERROR|EPIPE|ERR_STREAM_DESTROYED/.test(message);
+        this.consecutiveRuntimeFailures[kind] = runtime ? this.consecutiveRuntimeFailures[kind] + 1 : 0;
+        if (environment || this.consecutiveRuntimeFailures[kind] >= 3) {
+          this.blockingErrors.set(kind, message);
+          this.pause(kind);
+        }
         db.prepare(
           "UPDATE ai_jobs SET status='failed',last_error=?,updated_at=? WHERE kind=? AND file_id=?",
         ).run(String(error), Date.now(), kind, fileId);
+      }
     }
   }
   private displayName(tag: string) {
