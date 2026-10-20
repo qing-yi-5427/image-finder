@@ -1,6 +1,7 @@
 import { api } from "./client";
 import { useEffect, useState, useRef } from "react";
 import type { FileDetail, FileItem } from "../src/contracts.js";
+import { FileActionsMenu, type FileAction } from "./FileActions";
 import { Art } from "./Art";
 import { Button, Icon, Stars } from "./ui";
 import { titleOf, bytes } from "./model";
@@ -401,6 +402,7 @@ export function ImageViewer({
   onHelp,
   actions,
   quick = false,
+  onFileAction,
 }: {
   item: FileDetail;
   items: FileItem[];
@@ -411,10 +413,12 @@ export function ImageViewer({
   onHelp: () => void;
   actions: Actions;
   quick?: boolean;
+  onFileAction: (action: FileAction, ids: string[]) => void;
 }) {
   const [scale, setScale] = useState<number | null>(null),
     [pan, setPan] = useState({ x: 0, y: 0 }),
     [info, setInfo] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(
     null,
   );
@@ -423,6 +427,7 @@ export function ImageViewer({
   useEffect(() => {
     setScale(null);
     setPan({ x: 0, y: 0 });
+    setMenu(null);
   }, [item.id]);
   useEffect(() => {
     if (!box.current) return;
@@ -450,6 +455,10 @@ export function ImageViewer({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (document.querySelector(".if-modal-overlay")) return;
+      if (menu) {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setMenu(null); }
+        return;
+      }
       if (
         e.isComposing ||
         (e.target as HTMLElement)?.closest(
@@ -558,6 +567,14 @@ export function ImageViewer({
           className="if-viewer-image-area"
           ref={box}
           tabIndex={0}
+          aria-label="图片预览，Shift+F10 打开图片操作"
+          onKeyDown={(e) => {
+            if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+              e.preventDefault();
+              const bounds = box.current!.getBoundingClientRect();
+              setMenu({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2, ids: [item.id] });
+            }
+          }}
           onDoubleClick={(e) => {
             // Pointer capture during panning can retarget an image click to the
             // stage. Hit-test the real point as well, so only empty background closes.
@@ -624,6 +641,12 @@ export function ImageViewer({
         </Button>
       </div>
           <div
+            onContextMenu={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              drag.current = null;
+              box.current?.focus();
+              setMenu({ x: e.clientX, y: e.clientY, ids: [item.id] });
+            }}
             style={{
               width: (item.width || 600) * zoom,
               height: (item.height || 600) * zoom,
@@ -666,6 +689,14 @@ export function ImageViewer({
           />
         )}
       </div>
+      {menu && <FileActionsMenu menu={menu} onClose={() => setMenu(null)} onAction={onFileAction}
+        missing={item.missing || item.root.status === "offline"}
+        extras={[
+          { label: item.favorite ? "取消收藏" : "收藏图片", icon: "heart", run: () => actions.onFavorite(item) },
+          ...(item.artworkId && item.source ? [{ label: "打开 Pixiv 投稿", icon: "external-link", run: () => {
+            void api.invoke("files.openSource", { fileId: item.id }).catch((e) => actions.notify(e.message));
+          } }] : []),
+        ]} />}
       {postItems.length > 1 && (
         <div className="if-viewer-strip">
           <span>该投稿本地图（含不匹配项）</span>

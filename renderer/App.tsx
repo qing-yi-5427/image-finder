@@ -1676,6 +1676,7 @@ export default function App() {
           onHelp={() => setModal("help")}
           actions={actions}
           quick={viewer.quick}
+          onFileAction={(action, ids) => void fileOperations.perform(action, ids)}
         />
       )}
       {modal === "save" && (

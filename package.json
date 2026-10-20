@@ -1,6 +1,6 @@
 {
   "name": "image-finder",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "private": true,
   "description": "本地插画目录索引与整理服务",
   "main": "dist/src/electron/main.js",
@@ -41,7 +41,7 @@
     "appId": "local.imagefinder.app",
     "productName": "Image Finder",
     "directories": {
-      "output": "artifacts/package-v0.2.24"
+      "output": "artifacts/package-v0.2.25"
     },
     "files": [
       "dist/src/**/*",

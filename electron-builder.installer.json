@@ -3,7 +3,7 @@
   "appId": "local.imagefinder.app",
   "productName": "Image Finder",
   "directories": {
-    "output": "artifacts/installer-v0.2.24"
+    "output": "artifacts/installer-v0.2.25"
   },
   "files": [
     "dist/src/**/*",

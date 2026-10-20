@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FileActionResult } from "../src/api.js";
 import { api } from "./client";
 import { Button, Icon, Modal } from "./ui";
@@ -64,14 +65,32 @@ export function FileActionsMenu({
   menu,
   onClose,
   onAction,
+  missing = false,
+  extras = [],
 }: {
   menu: { x: number; y: number; ids: string[] };
   onClose: () => void;
   onAction: (action: FileAction, ids: string[]) => void;
+  missing?: boolean;
+  extras?: { label: string; icon: string; run: () => void }[];
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ x: menu.x, y: menu.y });
+  useLayoutEffect(() => {
+    const place = () => {
+      const bounds = ref.current?.getBoundingClientRect();
+      if (bounds) setPosition({
+        x: Math.max(8, Math.min(menu.x, window.innerWidth - bounds.width - 8)),
+        y: Math.max(8, Math.min(menu.y, window.innerHeight - bounds.height - 8)),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [menu.x, menu.y, extras.length]);
   useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     const close = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
@@ -81,18 +100,25 @@ export function FileActionsMenu({
     return () => {
       document.removeEventListener("pointerdown", close);
       window.removeEventListener("blur", blur);
+      if (previous?.isConnected) previous.focus();
     };
   }, []);
-  return (
+  return createPortal(
     <div
       className="if-popover if-file-menu"
       ref={ref}
       role="menu"
       aria-label={`文件操作，已选 ${menu.ids.length} 个文件`}
       style={{
-        left: Math.max(8, Math.min(menu.x, window.innerWidth - 240)),
-        top: Math.max(8, Math.min(menu.y, window.innerHeight - 260)),
+        left: position.x,
+        top: position.y,
+        maxHeight: "calc(100vh - 16px)",
+        overflowY: "auto",
+        maxWidth: "calc(100vw - 16px)",
       }}
+      onContextMenu={(e) => e.preventDefault()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "Escape" || e.key === "Tab") {
@@ -116,7 +142,7 @@ export function FileActionsMenu({
         }
       }}
     >
-      <p className="if-file-menu-count">{menu.ids.length} 个实际文件</p>
+      <p className="if-file-menu-count">{missing ? "原文件缺失或目录离线" : `${menu.ids.length} 个实际文件`}</p>
       {(["copy", "paths", "reveal", "open", "trash"] as FileAction[]).map(
         (action) => (
           <button
@@ -124,10 +150,7 @@ export function FileActionsMenu({
             role="menuitem"
             key={action}
             className={`if-menu-row ${action === "trash" ? "is-danger" : ""}`}
-            disabled={
-              (action === "open" || action === "reveal") &&
-              menu.ids.length !== 1
-            }
+            disabled={missing || ((action === "open" || action === "reveal") && menu.ids.length !== 1)}
             onClick={() => {
               onAction(action, [...menu.ids]);
               onClose();
@@ -149,7 +172,10 @@ export function FileActionsMenu({
           </button>
         ),
       )}
-    </div>
+      {extras.map((extra) => <button type="button" role="menuitem" className="if-menu-row" key={extra.label}
+        onClick={() => { extra.run(); onClose(); }}><Icon name={extra.icon} size={14} />{extra.label}</button>)}
+    </div>,
+    document.querySelector(".if-app") ?? document.body,
   );
 }
 
