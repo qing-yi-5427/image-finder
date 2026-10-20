@@ -352,3 +352,23 @@ test('task cancellation IPC is explicit provider-only and cancelled filters rema
  assert.throws(()=>validateInvocation('tasks.cancel',{kind:'all'}));assert.throws(()=>validateInvocation('tasks.cancel',{kind:'wd',scope:null}));
  validateInvocation('files.query',{filter:{enrichmentStatus:['cancelled']}});
 });
+
+
+test("automatic coverage counts files once and preserves effective, excluded and stale tag semantics", async () => {
+ const f=await fixture();
+ try {
+  for(const id of ["a","b","c"]){f.seed(id);for(const tag of ["tag_a","tag_b","tag_c"])
+   f.c.db.prepare("INSERT INTO ai_candidates VALUES(?,?,'content',0.9)").run(id,tag);}
+  f.c.enableAutomaticTags({rootId:f.root.id,relativePath:"",recursive:true});
+  f.c.db.exec("CREATE TABLE IF NOT EXISTS danbooru_jobs(file_id TEXT PRIMARY KEY,status TEXT,bytes INTEGER,mtime_ms REAL);CREATE TABLE IF NOT EXISTS sauce_jobs(file_id TEXT PRIMARY KEY,status TEXT);");
+  const state={pixiv:{paused:true},ai:{queues:[]},danbooru:{paused:true},sauce:{paused:true},local:{imagesPaused:true}};
+  const oldSql="WITH scoped AS (SELECT * FROM files_visible WHERE missing=0) SELECT count(DISTINCT f.id) n FROM scoped f JOIN ai_auto_effective ae ON ae.file_id=f.id WHERE NOT EXISTS(SELECT 1 FROM file_tag_overrides o WHERE o.file_id=f.id AND o.tag_id=ae.tag_id AND o.action='exclude')";
+  const check=(expected:number)=>{const old=(f.c.db.prepare(oldSql).get() as any).n;const current=taskOverview(f.c,null,null,state).cards.find(c=>c.kind==='wd')!.coverage.automaticTagged;assert.equal(current,old);assert.equal(current,expected);};
+  check(3);
+  const tags=f.c.db.prepare("SELECT tag_id FROM ai_automatic_tags WHERE file_id='a'").all() as any[];
+  f.c.overrideTags(["a"],[tags[0].tag_id],"exclude");check(3);
+  f.c.overrideTags(["a"],tags.map(t=>t.tag_id),"exclude");check(2);
+  f.c.db.prepare("INSERT INTO ai_reviews(file_id,tag,action,created_at) SELECT file_id,tag,'exclude',1 FROM ai_automatic_tags WHERE file_id='b'").run();check(1);
+  f.c.db.prepare("UPDATE ai_inputs SET bytes=99 WHERE file_id='c' AND kind='wd'").run();check(0);
+ }finally{await f.close();}
+});

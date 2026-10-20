@@ -304,6 +304,7 @@ export class LocalAi {
       CREATE TABLE IF NOT EXISTS ai_vectors(file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,model_version TEXT NOT NULL,dimension INTEGER NOT NULL,vector BLOB NOT NULL,PRIMARY KEY(file_id,model_version));
       CREATE TABLE IF NOT EXISTS ai_inputs(file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,kind TEXT NOT NULL,bytes INTEGER NOT NULL,mtime_ms REAL NOT NULL,PRIMARY KEY(file_id,kind));
       CREATE INDEX IF NOT EXISTS ai_jobs_ready ON ai_jobs(kind,status,updated_at);
+      CREATE INDEX IF NOT EXISTS ai_jobs_ready_file ON ai_jobs(kind,status,updated_at,file_id);
       UPDATE ai_jobs SET status='waiting' WHERE status='running';
       INSERT OR IGNORE INTO ai_state(kind) VALUES('wd'),('semantic');
     `);
@@ -338,6 +339,49 @@ export class LocalAi {
       })();
     } catch {}
   }
+  private modelStatus(kind: AiKind): AiStatus["models"][number] {
+    let marker: any = null;
+    try {
+      marker = JSON.parse(
+        readFileSync(path.join(this.home, "models-ready.json"), "utf8"),
+      );
+    } catch {}
+    const model = AI_MODELS[kind];
+    const filesMissing = [
+      ...model.files.map((name) => path.join("models", kind, name)),
+      "ai-worker.py",
+      ...(existsSync(this.python) ? [] : ["python/python.exe"]),
+    ].filter((name) => !existsSync(path.join(this.home, name)));
+    if (
+      marker?.format !== 1 ||
+      marker?.preprocess !==
+        "clip-rgba-white-bicubic-square224-meanstd-v2" ||
+      !model.files.every((name) => {
+        try {
+          const recorded = marker.files[kind][name];
+          const current = statSync(
+            path.join(this.home, "models", kind, name),
+          );
+          return (
+            current.size === recorded.bytes &&
+            /^[a-f0-9]{64}$/.test(recorded.sha256)
+          );
+        } catch {
+          return false;
+        }
+      })
+    )
+      filesMissing.push("models-ready.json（需要完整性校验）");
+    if(this.homeUnavailable)filesMissing.push("AI环境位置不可用，请重新连接原位置后重启程序");
+    return {
+      kind,
+      id: model.id,
+      version: model.version,
+      license: model.license,
+      ready: !filesMissing.length,
+      filesMissing,
+    };
+  }
   status(): AiStatus {
     const db = this.catalog.db;
     const total = (
@@ -349,53 +393,11 @@ export class LocalAi {
         readFileSync(path.join(this.home, "install-status.json"), "utf8"),
       ).stage;
     } catch {}
-    let marker: any = null;
-    try {
-      marker = JSON.parse(
-        readFileSync(path.join(this.home, "models-ready.json"), "utf8"),
-      );
-    } catch {}
     return {
       home: this.home,
       python: this.python,
       config: this.config(),
-      models: kinds.map((kind) => {
-        const model = AI_MODELS[kind];
-        const filesMissing = [
-          ...model.files.map((name) => path.join("models", kind, name)),
-          "ai-worker.py",
-          ...(existsSync(this.python) ? [] : ["python/python.exe"]),
-        ].filter((name) => !existsSync(path.join(this.home, name)));
-        if (
-          marker?.format !== 1 ||
-          marker?.preprocess !==
-            "clip-rgba-white-bicubic-square224-meanstd-v2" ||
-          !model.files.every((name) => {
-            try {
-              const recorded = marker.files[kind][name];
-              const current = statSync(
-                path.join(this.home, "models", kind, name),
-              );
-              return (
-                current.size === recorded.bytes &&
-                /^[a-f0-9]{64}$/.test(recorded.sha256)
-              );
-            } catch {
-              return false;
-            }
-          })
-        )
-          filesMissing.push("models-ready.json（需要完整性校验）");
-        if(this.homeUnavailable)filesMissing.push("AI环境位置不可用，请重新连接原位置后重启程序");
-        return {
-          kind,
-          id: model.id,
-          version: model.version,
-          license: model.license,
-          ready: !filesMissing.length,
-          filesMissing,
-        };
-      }),
+      models: kinds.map((kind) => this.modelStatus(kind)),
       queues: kinds.map((kind) => {
         const counts = { waiting: 0, running: 0, done: 0, failed: 0, cancelled:0 };
         for (const row of db
@@ -543,7 +545,7 @@ export class LocalAi {
     this.requireAvailable();
     this.blockingErrors.delete(kind);
     this.consecutiveRuntimeFailures[kind] = 0;
-    const model = this.status().models.find((model) => model.kind === kind)!;
+    const model = this.modelStatus(kind);
     if (!model.ready) throw new Error("AI_MODEL_MISSING");
     this.catalog.db
       .prepare("UPDATE ai_state SET paused=0 WHERE kind=?")
@@ -576,7 +578,7 @@ export class LocalAi {
     if (activeFile && activeFile !== fileId) throw new Error("AI_WD_BUSY");
     const file = this.catalog.getFile(fileId);
     if (file.missing) throw new Error("AI_INPUT_CHANGED");
-    if (!this.status().models.find((model) => model.kind === "wd")?.ready)
+    if (!this.modelStatus("wd").ready)
       throw new Error("AI_MODEL_MISSING");
     if (!activeFile)
       this.catalog.db
@@ -639,7 +641,7 @@ export class LocalAi {
         )
         .get(kind) as any;
       if (!row) continue;
-      if (!this.status().models.find((model) => model.kind === kind)?.ready) {
+      if (!this.modelStatus(kind).ready) {
         this.pause(kind);
         continue;
       }
@@ -906,7 +908,7 @@ export class LocalAi {
   }
   private async searchImpl(req:QueryRequest):Promise<QueryResult>{
     if (!req.semantic?.query.trim()) throw new Error("AI_QUERY_EMPTY");
-    if (!this.status().models.find((model) => model.kind === "semantic")?.ready)
+    if (!this.modelStatus("semantic").ready)
       throw new Error("AI_MODEL_MISSING");
     const text = validVector(
       (

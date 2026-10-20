@@ -420,7 +420,10 @@ void app.whenReady().then(async () => {
   appTray.start(
     trayIconPath(app.isPackaged, process.resourcesPath, app.getAppPath()),
   );
+  let progressLoading = false;
   const progress = setInterval(() => {
+    if (progressLoading || quitting) return;
+    progressLoading = true;
     void host
       .invoke("system.stats")
       .then(async (status) => {
@@ -439,7 +442,8 @@ void app.whenReady().then(async () => {
         if (!window.isDestroyed())
           window.webContents.send("image-finder:progress", status);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { progressLoading = false; });
   }, 1000);
   window.on("closed", () => clearInterval(progress));
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

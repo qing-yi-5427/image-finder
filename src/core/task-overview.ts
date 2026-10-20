@@ -148,7 +148,7 @@ export function taskOverview(
   };
   const wd = aiCard("wd", "WD 自动标签");
   wd.coverage.automaticTagged = count(
-    "SELECT count(DISTINCT f.id) n FROM scoped f JOIN ai_auto_effective ae ON ae.file_id=f.id WHERE NOT EXISTS(SELECT 1 FROM file_tag_overrides o WHERE o.file_id=f.id AND o.tag_id=ae.tag_id AND o.action='exclude')",
+    "SELECT count(*) n FROM scoped f WHERE EXISTS(SELECT 1 FROM ai_auto_effective ae WHERE ae.file_id=f.id AND NOT EXISTS(SELECT 1 FROM file_tag_overrides o WHERE o.file_id=f.id AND o.tag_id=ae.tag_id AND o.action='exclude'))",
   );
   const semantic = aiCard("semantic", "中文语义索引");
   const dan = card(

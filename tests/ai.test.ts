@@ -364,3 +364,30 @@ test("three consecutive worker failures stop the queue before consuming remainin
     const q=f.ai.status().queues[0];assert.equal(q.paused,true);assert.equal(q.counts.failed,3);assert.equal(q.counts.waiting,1);
   } finally { await f.ai.close(); f.catalog.close(); }
 });
+
+
+test("scheduler checks model readiness without computing a full catalogue status", async () => {
+ const f=await fixture();
+ const status=f.ai.status.bind(f.ai);
+ try {
+  f.ai.enqueue({kind:"wd",fileIds:["a"]});
+  f.catalog.db.prepare("UPDATE ai_state SET paused=0 WHERE kind='wd'").run();
+  f.ai.status=()=>{throw new Error("full status must not run in scheduler");};
+  (f.ai as any).schedule();
+  await (f.ai as any).activeWork.get("wd");
+  assert.equal((f.catalog.db.prepare("SELECT status FROM ai_jobs WHERE kind='wd' AND file_id='a'").get() as any).status,"done");
+ } finally { f.ai.status=status;await f.ai.close();f.catalog.close(); }
+});
+
+test("waiting queue order uses its covering index without a temporary sort", async () => {
+ const f=await fixture();
+ try {
+  f.ai.enqueue({kind:"wd",fileIds:["d","b","a","c"]});
+  f.catalog.db.prepare("UPDATE ai_jobs SET updated_at=1").run();
+  const query="SELECT file_id FROM ai_jobs WHERE kind=? AND status='waiting' ORDER BY updated_at,file_id LIMIT 1";
+  const plan=f.catalog.db.prepare("EXPLAIN QUERY PLAN "+query).all("wd") as any[];
+  assert.ok(plan.some(row=>row.detail.includes("ai_jobs_ready_file")));
+  assert.ok(plan.every(row=>!row.detail.includes("TEMP B-TREE")));
+  assert.equal((f.catalog.db.prepare(query).get("wd") as any).file_id,"a");
+ } finally { await f.ai.close();f.catalog.close(); }
+});
