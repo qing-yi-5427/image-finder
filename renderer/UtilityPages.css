@@ -438,7 +438,8 @@
 
 .if-utilities .if-task-overview-grid>.if-task-overview-card>.if-task-body>.if-task-owned-details{border-top:1px solid var(--if-line);border-bottom:0;flex-shrink:0}
 /* Settings uses a small local index; each category keeps its mounted form drafts. */
-.if-utilities.if-settings-page { max-width: 1200px; margin: 0 auto; }
+/* Inline-size containment has no intrinsic width: declare the flex child width before centering it. */
+.if-utilities.if-settings-page { width:100%; max-width:1200px; min-width:0; margin:0 auto; }
 .if-settings-layout { display:grid; grid-template-columns:164px minmax(0,1fr); gap:32px; align-items:start; scroll-margin-top:20px; }
 .if-settings-navigation { display:flex; flex-direction:column; gap:5px; position:sticky; top:20px; }
 .if-settings-navigation button { text-align:left; display:flex; flex-direction:column; gap:5px; border:1px solid transparent; background:transparent; padding:12px; border-radius:7px; color:var(--if-sub); cursor:pointer; min-width:0; }
