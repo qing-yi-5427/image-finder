@@ -1893,7 +1893,7 @@ export default function App() {
           </Button>
         </div>
       )}
-      {fileMenu && <FileActionsMenu menu={fileMenu} onClose={()=>setFileMenu(null)}
+      {fileMenu && <FileActionsMenu menu={fileMenu} missing={fileMenu.ids.length === 1 && items.some(item=>item.id === fileMenu.ids[0] && (item.missing || stats?.roots.some(root=>root.id === item.rootId && root.status === "offline")))} onClose={()=>setFileMenu(null)}
         onAction={(action,ids)=>void fileOperations.perform(action,ids)}/>}
       {fileOperations.report && <FileOperationReport result={fileOperations.report} onClose={fileOperations.closeReport}
         names={new Map(items.map(item=>[item.id,item.relativePath]))}/>}

@@ -18,6 +18,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     copyFiles: async (paths) => {
       calls.push(["copyFiles", paths]);
     },
+    copyImage: async (p) => { calls.push(["copyImage", p]); },
     copyText: (text) => {
       calls.push(["copyText", text]);
     },
@@ -194,4 +195,17 @@ test("successful recycle commits missing without removing favorites, rating or t
   } finally {
     await service.close();
   }
+});
+
+test("bitmap copy resolves exactly one ID and propagates resolve/decode/clipboard errors without poisoning queue", async () => {
+ const { actions, calls } = fixture();
+ await actions.run("files.copyImage", {fileId:"chosen"});
+ assert.deepEqual(calls, [["images.resolve",{fileId:"chosen",variant:"original"}],["copyImage","E:\\原目录\\chosen.png"]]);
+ let failure=true;
+ const f=fixture({copyImage:async()=>{if(failure)throw new Error("decode/clipboard unavailable");}});
+ await assert.rejects(f.actions.run("files.copyImage",{fileId:"one"}),/unavailable/);
+ failure=false;await f.actions.run("files.copyImage",{fileId:"two"});
+ const missing=fixture({invoke:async()=>{throw new Error("fingerprint changed");}});
+ await assert.rejects(missing.actions.run("files.copyImage",{fileId:"one"}),/fingerprint changed/);
+ assert.equal(missing.calls.length,0);
 });

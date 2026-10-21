@@ -1,3 +1,4 @@
+import { copyImageToClipboard } from "./image-clipboard.js";
 import { AppTray, trayIconPath } from "./tray.js";
 import { NativeFileDrag } from "./file-drag.js";
 import { AiEnvironment, markManagedAiHome, isOwnedAiHome } from "./ai-environment.js";
@@ -192,6 +193,7 @@ void app.whenReady().then(async () => {
     invoke: (method, payload) => host.invoke(method, payload),
     copyFiles: copyWindowsFiles,
     copyText: (text) => clipboard.writeText(text),
+    copyImage: copyImageToClipboard,
     openPath: (path) => shell.openPath(path),
     reveal: (path) => shell.showItemInFolder(path),
     trash: (path) => shell.trashItem(path),
@@ -326,7 +328,7 @@ void app.whenReady().then(async () => {
       return;
     }
     if (
-      ["files.reveal", "files.open", "files.copy", "files.trash"].includes(
+      ["files.reveal", "files.open", "files.copy", "files.copyImage", "files.trash"].includes(
         method,
       )
     )

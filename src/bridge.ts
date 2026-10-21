@@ -240,7 +240,7 @@ route("ai.environmentClear",{});
 route("ai.prepareCleanup",{});
 route("ai.finishCleanup",{});
 route("files.drag", {fileIds: v=>ids(v)&&v.length>0&&v.length<=500});
-for (const m of ["files.reveal", "files.openSource", "files.open"])
+for (const m of ["files.reveal", "files.openSource", "files.open", "files.copyImage"])
   route(m, { fileId: str });
 route("files.copy", {
   fileIds: (v) => ids(v) && v.length > 0,

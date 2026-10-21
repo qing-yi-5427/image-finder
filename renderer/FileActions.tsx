@@ -4,8 +4,9 @@ import type { FileActionResult } from "../src/api.js";
 import { api } from "./client";
 import { Button, Icon, Modal } from "./ui";
 
-export type FileAction = "copy" | "paths" | "open" | "reveal" | "trash";
+export type FileAction = "image" | "copy" | "paths" | "open" | "reveal" | "trash";
 export const fileActionLabels: Record<FileAction, string> = {
+  image: "复制图片",
   copy: "复制文件",
   paths: "复制路径",
   open: "用默认程序打开",
@@ -28,6 +29,12 @@ export function useFileOperations({
     active.current = true;
     setBusy(true);
     try {
+      if (action === "image") {
+        if (ids.length !== 1) throw new Error("复制图片仅支持单张图片，请只选择一张。");
+        await api.invoke("files.copyImage", { fileId: ids[0] });
+        notify("已复制图片，可在聊天窗口粘贴");
+        return;
+      }
       if (action === "open" || action === "reveal") {
         await api.invoke(action === "open" ? "files.open" : "files.reveal", {
           fileId: ids[0],
@@ -143,14 +150,14 @@ export function FileActionsMenu({
       }}
     >
       <p className="if-file-menu-count">{missing ? "原文件缺失或目录离线" : `${menu.ids.length} 个实际文件`}</p>
-      {(["copy", "paths", "reveal", "open", "trash"] as FileAction[]).map(
+      {(["copy", "paths", "image", "reveal", "open", "trash"] as FileAction[]).map(
         (action) => (
           <button
             type="button"
             role="menuitem"
             key={action}
             className={`if-menu-row ${action === "trash" ? "is-danger" : ""}`}
-            disabled={missing || ((action === "open" || action === "reveal") && menu.ids.length !== 1)}
+            disabled={missing || ((action === "image" || action === "open" || action === "reveal") && menu.ids.length !== 1)}
             onClick={() => {
               onAction(action, [...menu.ids]);
               onClose();
@@ -159,6 +166,7 @@ export function FileActionsMenu({
             <Icon
               name={
                 {
+                  image: "image",
                   copy: "copy",
                   paths: "link",
                   reveal: "folder-open",

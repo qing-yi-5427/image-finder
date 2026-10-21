@@ -107,6 +107,7 @@ export interface MethodMap extends importAiMethodMap {
   "files.query": Route<QueryRequest, QueryResult>;
   "files.detail": Route<{ fileId: string }, FileDetail>;
   "files.reveal": Route<{ fileId: string }, void>;
+  "files.copyImage": Route<{ fileId: string }, void>;
   "files.open": Route<{ fileId: string }, void>;
   "files.copy": Route<
     { fileIds: string[]; format: "files" | "paths" },

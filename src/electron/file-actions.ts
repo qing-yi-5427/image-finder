@@ -64,6 +64,7 @@ interface Dependencies {
   invoke: (method: string, payload: unknown) => Promise<any>;
   copyFiles: (paths: string[]) => Promise<void>;
   copyText: (text: string) => void;
+  copyImage: (path: string) => Promise<void>;
   openPath: (path: string) => Promise<string>;
   reveal: (path: string) => void;
   trash: (path: string) => Promise<void>;
@@ -99,6 +100,10 @@ export class FileActions {
       format?: "files" | "paths";
     },
   ): Promise<FileActionResult | void> {
+    if (method === "files.copyImage") {
+      await this.deps.copyImage(await this.resolve(payload.fileId!));
+      return;
+    }
     if (method === "files.open" || method === "files.reveal") {
       const original = await this.resolve(payload.fileId!);
       if (method === "files.reveal") this.deps.reveal(original);
